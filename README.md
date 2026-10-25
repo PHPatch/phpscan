@@ -204,6 +204,21 @@ Patching, on-server verification, rollback, an evidence work
 report, and monitoring are what the hosted service adds:
 **[PHP Patch Assurance — phpatch.com](https://phpatch.com)**.
 
+## Guides and further reading
+
+- **[Self-hoster guides](https://phpatch.com/guides)** — update
+  PHP in Docker and with apt, mod_php vs PHP-FPM, rollback,
+  health checks, version checks, end-of-life upgrades, and
+  patching without downtime, written from the patch flow the
+  service itself uses.
+- **[php2shell fix guide](https://phpatch.com/threats/php2shell)**
+  — what php2shell is, who is affected, how to check and patch,
+  the fixed releases, and the primary sources.
+- **[Case study: mitbbs.ai](https://phpatch.com/case-studies/mitbbs-ai)**
+  — how a bilingual news portal patched php2shell on disclosure
+  night: 8.3.35 to 8.3.36 under mod_php, about 10 seconds of
+  downtime, verified live, no compromise found.
+
 ## Authorized use
 
 Only scan sites you own or have permission to scan. The hosted
