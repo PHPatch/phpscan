@@ -84,12 +84,12 @@ def verdict_for(version, distro=False):
                            "fixes for this branch, so confirm via "
                            "the distro security tracker or the "
                            "on-server deep check.")
-            return {{"status": "eol", "version": fmt(version),
+            return {"status": "eol", "version": fmt(version),
                     "branch": branch, "advisory": adv["id"],
                     "cves": adv["cves"], "detail": detail,
                     "remediation": ("Upgrade to a supported PHP branch "
                                     "(8.2 or later) and apply its patched "
-                                    "release, or take the site offline.")}}
+                                    "release, or take the site offline.")}
         floor_txt = adv["fixed_releases"].get(branch)
         if floor_txt is None:
             continue  # branch newer than the advisory knows
