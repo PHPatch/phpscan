@@ -611,5 +611,27 @@ class CliExitCodes(unittest.TestCase):
             self.assertEqual(cli.main([]), 2)
 
 
+class Remediation(unittest.TestCase):
+    def test_vulnerable_names_floor(self):
+        v = versioning.verdict_for((8, 3, 20))
+        self.assertEqual(v["status"], "vulnerable")
+        self.assertIn("8.3.36", v["remediation"])
+
+    def test_distro_points_at_tracker(self):
+        v = versioning.verdict_for((8, 3, 20), distro=True)
+        self.assertEqual(v["status"], "possibly_vulnerable")
+        self.assertIn("distro security tracker", v["remediation"])
+
+    def test_eol_names_upgrade_or_offline(self):
+        v = versioning.verdict_for((8, 1, 34))
+        self.assertEqual(v["status"], "eol")
+        self.assertIn("offline", v["remediation"])
+
+    def test_patched_has_no_remediation(self):
+        v = versioning.verdict_for((8, 3, 36))
+        self.assertEqual(v["status"], "patched")
+        self.assertNotIn("remediation", v)
+
+
 if __name__ == "__main__":
     unittest.main()

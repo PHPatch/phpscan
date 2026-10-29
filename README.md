@@ -38,7 +38,10 @@ It is the open-source scanner behind [phpatch.com](https://phpatch.com).
 ## Verdicts
 
 Every scan returns one JSON object per URL. The `verdict.status`
-field uses the vocabulary below (shown here in its display form):
+field uses the vocabulary below (shown here in its display form).
+Actionable verdicts (`vulnerable`, `possibly_vulnerable`, `eol`)
+also carry a `remediation` field naming the upgrade that fixes
+them; patched verdicts carry none.
 
 | Verdict | JSON `status` | Meaning |
 |---|---|---|
@@ -128,6 +131,13 @@ the php.net release announcements on every PHP security release
 git clone https://github.com/PHPatch/phpscan.git
 cd phpscan
 # Python 3.11+ standard library only — no pip install, no dependencies.
+```
+
+Or install it directly from GitHub, no clone needed:
+
+```bash
+pip install git+https://github.com/PHPatch/phpscan.git
+python3 -m phpscan https://your-site.com
 ```
 
 ## Run it
@@ -256,6 +266,16 @@ research. Plainly stated on the page: PHPatch is operated by
 Superstar Telecom LLC, a for-profit company, so donations are
 voluntary support — not tax-deductible, and they buy no
 product, service or entitlement.
+
+## Scanned by phpscan badge
+
+If you scan your site with phpscan, you can show it:
+
+[![Scanned by phpscan](https://img.shields.io/badge/scanned%20by-phpscan-blue.svg)](https://phpatch.com)
+
+```markdown
+[![Scanned by phpscan](https://img.shields.io/badge/scanned%20by-phpscan-blue.svg)](https://phpatch.com)
+```
 
 ## License
 

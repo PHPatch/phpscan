@@ -84,9 +84,12 @@ def verdict_for(version, distro=False):
                            "fixes for this branch, so confirm via "
                            "the distro security tracker or the "
                            "on-server deep check.")
-            return {"status": "eol", "version": fmt(version),
+            return {{"status": "eol", "version": fmt(version),
                     "branch": branch, "advisory": adv["id"],
-                    "cves": adv["cves"], "detail": detail}
+                    "cves": adv["cves"], "detail": detail,
+                    "remediation": ("Upgrade to a supported PHP branch "
+                                    "(8.2 or later) and apply its patched "
+                                    "release, or take the site offline.")}}
         floor_txt = adv["fixed_releases"].get(branch)
         if floor_txt is None:
             continue  # branch newer than the advisory knows
@@ -108,12 +111,18 @@ def verdict_for(version, distro=False):
                        "treat this as a check signal, not proof — "
                        "confirm via the distro security tracker or "
                        "the on-server deep check.")
+        remediation = (f"Upgrade PHP {branch} to {p['floor']} or later.")
+        if distro:
+            remediation += (" Confirm via the distro security tracker "
+                            "that a backported fix is installed — a "
+                            "distribution package may already be patched.")
         return {"status": "possibly_vulnerable" if distro
                 else "vulnerable",
                 "version": fmt(version),
                 "branch": branch, "advisory": p["advisory"],
                 "cves": p["cves"], "cvss_v4": p.get("cvss_v4"),
-                "floor": p["floor"], "detail": detail}
+                "floor": p["floor"], "detail": detail,
+                "remediation": remediation}
     if not assessed:
         return {"status": "not_assessed", "version": fmt(version),
                 "branch": branch,
