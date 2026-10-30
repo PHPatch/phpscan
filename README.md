@@ -127,18 +127,16 @@ the php.net release announcements on every PHP security release
 
 ## Install
 
-```bash
-git clone https://github.com/PHPatch/phpscan.git
-cd phpscan
-# Python 3.11+ standard library only — no pip install, no dependencies.
-```
-
-Or install it directly from GitHub, no clone needed:
+One line, from PyPI (Python 3.11+, standard library only — zero dependencies):
 
 ```bash
-pip install git+https://github.com/PHPatch/phpscan.git
-python3 -m phpscan https://your-site.com
+pipx install phpscan
+phpscan https://your-site.com
 ```
+
+Also available as a Docker image (`docker run ghcr.io/phpatch/phpscan https://your-site.com`),
+a GitHub Action (`PHPatch/phpscan-action@v1`), directly from GitHub
+(`pip install git+https://github.com/PHPatch/phpscan.git`), or by cloning this repo.
 
 ## Run it
 
