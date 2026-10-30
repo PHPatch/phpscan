@@ -40,6 +40,17 @@ It is the open-source scanner behind [phpatch.com](https://phpatch.com).
   against known-vulnerable ranges, and reports configuration
   exposures (`.git`, `.env`, directory listings, missing security
   headers) — every finding with a remediation. See below.
+- **Exposed `composer.lock` audit.** If the site serves its
+  `composer.lock` publicly, the scan reads it (bounded,
+  defensively parsed) and runs the same dependency audit as
+  `phpscan audit` against the locked versions — OSV,
+  FriendsOfPHP and CISA KEV, vendored-only with `--offline` —
+  merging the findings into the scan's verdict under
+  `dependencies`, each stamped with the lockfile's URL as
+  provenance. The exposure itself is reported as a finding.
+  High/critical dependency findings escalate the verdict just
+  like other critical findings. An absent, malformed or
+  oversized lockfile changes nothing about the scan.
 
 ## Verdicts
 

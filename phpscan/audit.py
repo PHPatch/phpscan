@@ -442,12 +442,24 @@ def parse_lock(lock):
 
 def run_audit(lock_path, offline=False, osv_batch=None, osv_vuln=None,
               fop=None, kev=None):
-    """Returns (report_dict, exit_code). The osv_*/fop/kev
-    parameters are dependency-injection seams for tests."""
+    """Audit the composer.lock at `lock_path`. Returns
+    (report_dict, exit_code). The osv_*/fop/kev parameters are
+    dependency-injection seams for tests."""
     with open(lock_path, encoding="utf-8") as fh:
         lock = json.load(fh)
     if not isinstance(lock, dict) or "packages" not in lock:
         raise ValueError("not a composer.lock (no 'packages' key)")
+    return audit_lock(lock, lock_path, offline=offline,
+                      osv_batch=osv_batch, osv_vuln=osv_vuln,
+                      fop=fop, kev=kev)
+
+
+def audit_lock(lock, target, offline=False, osv_batch=None,
+               osv_vuln=None, fop=None, kev=None):
+    """Audit an already-parsed composer.lock dict. `target` is
+    the label recorded in the report (a file path for the local
+    audit, the source URL for an exposed lockfile judged by the
+    external scan). Returns (report_dict, exit_code)."""
     pkgs = parse_lock(lock)
 
     if fop is None:
@@ -586,7 +598,7 @@ def run_audit(lock_path, offline=False, osv_batch=None, osv_vuln=None,
                               f"are listed under 'unassessed' — no "
                               f"verdict is claimed for them.")
     report = {
-        "target": lock_path,
+        "target": target,
         "mode": "audit",
         "packages_scanned": len(pkgs) - n_dev,
         "dev_packages_scanned": n_dev,
@@ -603,6 +615,97 @@ def run_audit(lock_path, offline=False, osv_batch=None, osv_vuln=None,
         "verdict": verdict,
     }
     return report, 1 if flist else 0
+
+
+# ----------------------------------------------------------------
+# Severity levels for consumers of the audit (the external scan
+# escalates its verdict on high/critical dependency findings, so
+# it needs a level per finding in its own vocabulary)
+# ----------------------------------------------------------------
+
+_SEV_WORDS = {"critical": "critical", "high": "high",
+              "moderate": "medium", "medium": "medium",
+              "low": "low"}
+
+
+def _cvss3_base_score(vector):
+    """Base score for a CVSS v3.x vector string, or None when the
+    string is not a complete, parseable v3 vector. Implements the
+    FIRST 3.1 equations, including the official roundup."""
+    metrics = {}
+    for part in str(vector).strip().split("/"):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            metrics[k.strip().upper()] = v.strip().upper()
+    if not metrics.get("CVSS", "").startswith("3"):
+        return None
+    try:
+        av = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}[metrics["AV"]]
+        ac = {"L": 0.77, "H": 0.44}[metrics["AC"]]
+        ui = {"N": 0.85, "R": 0.62}[metrics["UI"]]
+        scope_changed = metrics["S"] == "C"
+        if scope_changed:
+            pr = {"N": 0.85, "L": 0.68, "H": 0.50}[metrics["PR"]]
+        else:
+            pr = {"N": 0.85, "L": 0.62, "H": 0.27}[metrics["PR"]]
+        c = {"H": 0.56, "L": 0.22, "N": 0.0}[metrics["C"]]
+        i = {"H": 0.56, "L": 0.22, "N": 0.0}[metrics["I"]]
+        a = {"H": 0.56, "L": 0.22, "N": 0.0}[metrics["A"]]
+    except KeyError:
+        return None
+    isc = 1 - (1 - c) * (1 - i) * (1 - a)
+    if scope_changed:
+        impact = 7.52 * (isc - 0.029) - 3.25 * (isc - 0.02) ** 15
+        impact = max(impact, 0.0)
+    else:
+        impact = 6.42 * isc
+    exploitability = 8.22 * av * ac * pr * ui
+    if impact <= 0:
+        base = 0.0
+    elif scope_changed:
+        base = min(1.08 * (impact + exploitability), 10.0)
+    else:
+        base = min(impact + exploitability, 10.0)
+
+    def roundup(x):
+        int_input = int(x * 100000)
+        if int_input % 10000 == 0:
+            return int_input / 100000.0
+        return (int(int_input / 10000) + 1) / 10.0
+
+    return roundup(base)
+
+
+def severity_level(f):
+    """The severity level ('critical' | 'high' | 'medium' |
+    'low') the published evidence supports for one audit finding,
+    or None when no source states one.
+
+    Order: an OSV severity word; a CVSS v3.x vector, scored and
+    banded (>=9 critical, >=7 high, >=4 medium, else low); the
+    CISA KEV cross-reference — a KEV-listed CVE is confirmed
+    exploited in the wild, which this tool treats as 'high' for
+    escalation purposes. A FriendsOfPHP-only finding whose
+    sources publish no severity keeps None: no level is invented,
+    and None never escalates anything."""
+    sev = f.get("severity")
+    if isinstance(sev, str):
+        word = sev.strip().lower()
+        if word in _SEV_WORDS:
+            return _SEV_WORDS[word]
+        if word.startswith("cvss:3"):
+            score = _cvss3_base_score(sev)
+            if score is not None:
+                if score >= 9:
+                    return "critical"
+                if score >= 7:
+                    return "high"
+                if score >= 4:
+                    return "medium"
+                return "low"
+    if f.get("kev"):
+        return "high"
+    return None
 
 
 USAGE = ("usage: phpscan audit <composer.lock|directory> [--offline]"

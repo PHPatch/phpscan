@@ -1,6 +1,9 @@
-"""CLI: python3 -m phpscan <url> [more urls...]
+"""CLI: python3 -m phpscan [--offline] <url> [more urls...]
 
-Prints one JSON verdict object per URL.
+Prints one JSON verdict object per URL. --offline keeps every
+lookup local: in particular, an exposed composer.lock found by
+the scan is audited against the vendored advisory snapshots
+only, with no live OSV queries.
 
 Also: python3 -m phpscan hunt <webroot> [--include-vendor] —
 read-only local compromise check (see phpscan/hunt.py); its
@@ -43,10 +46,19 @@ def main(argv):
     if argv[0] == "audit":
         from .audit import audit_main
         return audit_main(argv[1:])
+    offline = "--offline" in argv
+    if offline:
+        argv = [a for a in argv if a != "--offline"]
+    if not argv:
+        print(__doc__)
+        return 2
     worst = 0
     for url in argv:
         try:
-            r = scan(url)
+            # The plain one-argument call is the historical
+            # shape; the offline keyword is passed only when the
+            # flag was actually given.
+            r = scan(url, offline=True) if offline else scan(url)
             print(json.dumps(r, indent=1))
             status = (r.get("verdict") or {}).get("status")
             if r.get("compromise_indicators"):

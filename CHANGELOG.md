@@ -6,6 +6,32 @@ the git log.
 
 ## Unreleased
 
+- External scan: exposed-`composer.lock` audit. When a scan
+  finds the site's `composer.lock` publicly served, it fetches
+  the file through the guarded fetcher (bounded 8 MB read,
+  defensive parse — the body is untrusted input) and runs the
+  existing dependency-audit engine against packages +
+  packages-dev (live OSV + vendored FriendsOfPHP + CISA KEV;
+  `phpscan --offline <url>` restricts the merged audit to the
+  vendored snapshots). Results land in the result's new
+  `dependencies` block and, for findings whose severity the
+  published evidence supports (an OSV severity word, a scored
+  CVSS v3.x vector, or a CISA KEV listing — treated as high,
+  since KEV means confirmed exploited in the wild), as
+  `vulnerable_dependency` entries in `findings`; high/critical
+  dependency findings escalate the verdict exactly like hygiene
+  criticals. Every merged finding carries `provenance` naming
+  the exposed lockfile and its URL. The exposure itself is a
+  medium finding (`composer_lock_exposed`): the file discloses
+  exact dependency versions. Absent, malformed, HTML-fallback
+  or oversized lockfiles leave the scan byte-for-byte what it
+  was — no new failure mode. Audit internals: `run_audit`'s
+  engine is now `audit.audit_lock(lock_dict, target_label)`
+  over a parsed lock, shared by the file audit and the scan,
+  and `audit.severity_level()` exposes the evidence-scoped
+  severity of a finding (None when no source publishes one —
+  never invented).
+
 ## 1.6.0 — 2026-10-30
 
 - VERSION HIDDEN verdicts (status `indeterminate`) now carry

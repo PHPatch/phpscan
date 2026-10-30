@@ -5,6 +5,15 @@ Server headers, PHPSESSID cookies, CMS generator signals, and exposed
 phpinfo pages. An exact version, when disclosed, is checked against the
 patched-release floors.
 
+One disclosure is also an audit input: if the site serves its
+composer.lock publicly, the scan fetches it (bounded read, defensive
+parse — the file is untrusted input) and runs the dependency audit
+engine (phpscan/audit.py) against the locked versions, merging the
+findings into the same verdict with the lockfile URL as provenance.
+The exposure itself is a finding: it discloses exact dependency
+versions. If the lockfile is absent, malformed, or too large, the
+scan proceeds exactly as if it were not there.
+
 Honest limit: most well-run sites suppress version headers. For those the
 scan reports "PHP detected, version hidden — patch status cannot be
 confirmed from outside" and recommends the credentialed deep check.
@@ -12,6 +21,7 @@ confirmed from outside" and recommends the credentialed deep check.
 
 import http.client
 import ipaddress
+import json
 import re
 import socket
 import ssl
@@ -19,13 +29,20 @@ import threading
 import time
 import urllib.parse
 
-from . import detect, hygiene, versioning
+from . import audit, detect, hygiene, versioning
 
 _UA = "phpscan/1.4.4 (+https://phpatch.com/security)"
 _TIMEOUT = 12
 _MAX_BODY = 512 * 1024
 _MAX_REDIRECTS = 5
 _PHPINFO_PATHS = ("/phpinfo.php", "/info.php", "/php-info.php", "/test.php")
+_LOCK_PATH = "/composer.lock"
+# Bounded read for the exposed lockfile: real-world locks run
+# larger than a web page, so the cap is more generous than
+# _MAX_BODY — but still a hard bound. A response past the cap
+# arrives truncated, fails the defensive parse, and the scan
+# proceeds exactly as if no lockfile were exposed.
+_LOCK_MAX_BODY = 8 * 1024 * 1024
 
 # Owner self-check guidance for the VERSION HIDDEN verdict
 # (status "indeterminate"): the scan cannot assess a version the
@@ -191,21 +208,22 @@ def _kill_conn(conn):
         pass
 
 
-def _read_capped(resp, budget=None, sock=None):
-    """Read a response body up to _MAX_BODY bytes under a TOTAL
-    deadline, so a slow-drip server cannot hold the scanner open
-    one byte at a time under the per-read socket timeout. The cap
-    applies to the raw bytes as received; the scanner never
-    decompresses, so a compressed bomb never expands. `budget`
-    (seconds remaining in the fetch's total deadline) can only
-    shorten the read, never extend it past _DEADLINE. When `sock`
-    is given, its timeout is recomputed from the remaining budget
-    before every chunk read, so no single read can wait past the
-    deadline either."""
+def _read_capped(resp, budget=None, sock=None, max_body=None):
+    """Read a response body up to `max_body` bytes (default
+    _MAX_BODY) under a TOTAL deadline, so a slow-drip server
+    cannot hold the scanner open one byte at a time under the
+    per-read socket timeout. The cap applies to the raw bytes as
+    received; the scanner never decompresses, so a compressed
+    bomb never expands. `budget` (seconds remaining in the
+    fetch's total deadline) can only shorten the read, never
+    extend it past _DEADLINE. When `sock` is given, its timeout
+    is recomputed from the remaining budget before every chunk
+    read, so no single read can wait past the deadline either."""
+    cap = _MAX_BODY if max_body is None else max_body
     chunks, got = [], 0
     secs = _DEADLINE if budget is None else min(_DEADLINE, budget)
     end = time.monotonic() + secs
-    while got <= _MAX_BODY:
+    while got <= cap:
         remaining = end - time.monotonic()
         if remaining <= 0:
             break
@@ -215,7 +233,7 @@ def _read_capped(resp, budget=None, sock=None):
             except Exception:
                 pass
         try:
-            chunk = resp.read(min(65536, _MAX_BODY + 1 - got))
+            chunk = resp.read(min(65536, cap + 1 - got))
         except http.client.IncompleteRead as e:
             # Server/proxy closed mid-body (common behind CDNs);
             # the partial body is still a successful fetch.
@@ -226,7 +244,7 @@ def _read_capped(resp, budget=None, sock=None):
             break
         chunks.append(chunk)
         got += len(chunk)
-    return b"".join(chunks)[:_MAX_BODY]
+    return b"".join(chunks)[:cap]
 
 
 def _headers_dict(resp):
@@ -239,7 +257,7 @@ def _headers_dict(resp):
     return out
 
 
-def _fetch(url, ctx=None, deadline=None):
+def _fetch(url, ctx=None, deadline=None, max_body=None):
     """Guarded fetch: http/https only, ports 80/443 only, no URL
     credentials, every redirect hop re-validated and IP-pinned,
     body capped, and a TOTAL deadline across connect + headers +
@@ -314,7 +332,8 @@ def _fetch(url, ctx=None, deadline=None):
                     redirected = True
                     break
                 raw = _read_capped(resp, end - time.monotonic(),
-                                   sock=getattr(conn, "sock", None))
+                                   sock=getattr(conn, "sock", None),
+                                   max_body=max_body)
                 body = raw.decode("utf-8", "replace")
                 return {"ok": status < 400, "status": status,
                         "final_url": current, "headers": headers,
@@ -353,7 +372,105 @@ def _h(headers, name):
     return ""
 
 
-def scan(url):
+def _exposed_lock(fetch, base, offline=False):
+    """Audit a publicly exposed /composer.lock, if one is really
+    there. Returns (lock_info, scan_findings): lock_info is the
+    value for the result's "dependencies" key — None whenever no
+    lockfile is confirmed exposed (absent, not JSON, not a lock,
+    malformed packages, or truncated by the bounded read) — and
+    scan_findings carries the exposure finding plus one
+    vulnerable-dependency finding per audit finding whose
+    severity the published evidence supports.
+
+    The fetched body is untrusted input: JSON parsing is
+    defensive, structure is validated by the audit engine's own
+    parser, and nothing from the file is echoed into output
+    except package names, versions, and advisory identifiers —
+    the same data the local `phpscan audit` reports. Every merged
+    finding is stamped with its provenance: the exposed lockfile
+    and its URL."""
+    url = base + _LOCK_PATH
+    try:
+        r = fetch(url)
+    except Exception:
+        return None, []
+    if not r or r.get("status") != 200:
+        return None, []
+    try:
+        lock = json.loads(r.get("body") or "")
+    except (ValueError, TypeError):
+        return None, []
+    if not isinstance(lock, dict) \
+            or not isinstance(lock.get("packages"), list):
+        return None, []
+    try:
+        report, _code = audit.audit_lock(lock, url, offline=offline)
+    except (ValueError, TypeError, KeyError):
+        return None, []
+
+    provenance = {"type": "exposed_composer_lock", "url": url}
+    for f in report["findings"]:
+        f["provenance"] = dict(provenance)
+    lock_info = {
+        "source": "exposed_composer_lock",
+        "source_url": url,
+        "packages_scanned": report["packages_scanned"],
+        "dev_packages_scanned": report["dev_packages_scanned"],
+        "sources": report["sources"],
+        "findings": report["findings"],
+        "unassessed": report["unassessed"],
+    }
+
+    total = report["packages_scanned"] + report["dev_packages_scanned"]
+    out = [{
+        "kind": "composer_lock_exposed", "severity": "medium",
+        "title": "composer.lock publicly exposed",
+        "detail": f"The site's composer.lock answers publicly at "
+                  f"{_LOCK_PATH}. It discloses the exact version "
+                  f"of every dependency the site runs ({total} "
+                  f"locked package(s)), which lets an attacker "
+                  f"shop for a matching exploit instead of probing "
+                  f"blind. The scan audited those versions; the "
+                  f"results are under 'dependencies'.",
+        "remediation": "Remove composer.lock from the web root "
+                       "or deny access to it at the web server "
+                       "(like /.env and /.git), and deploy from a "
+                       "build step that keeps composer files "
+                       "outside the served tree.",
+        "path": _LOCK_PATH,
+        "provenance": dict(provenance)}]
+    for f in report["findings"]:
+        level = audit.severity_level(f)
+        if level is None:
+            # No published severity and not KEV-listed: the
+            # finding stands in `dependencies` at full fidelity,
+            # but it is not dressed up with a severity it does
+            # not carry, and it does not escalate the verdict.
+            continue
+        detail = (f"{f['title']} — pinned version {f['version']} "
+                  f"of {f['package']} in the exposed composer.lock "
+                  f"is affected by {f['id']}.")
+        if f.get("kev"):
+            detail += (" The CVE is in CISA's Known Exploited "
+                       "Vulnerabilities catalog (confirmed "
+                       "exploited in the wild).")
+        if f.get("dev"):
+            detail += " (Dev-only dependency.)"
+        out.append({
+            "kind": "vulnerable_dependency", "severity": level,
+            "title": f"Vulnerable dependency: {f['package']} "
+                     f"{f['version']} ({f['id']})",
+            "detail": detail,
+            "remediation": f["remediation"],
+            "package": f["package"], "version": f["version"],
+            "dev": f["dev"], "advisory_id": f["id"],
+            "cve": f.get("cve"), "kev": bool(f.get("kev")),
+            "fixed": f.get("fixed"),
+            "provenance": dict(provenance)})
+    return lock_info, out
+
+
+def scan(url, offline=False):
     if not re.match(r"^https?://", url):
         url = "https://" + url
     # One deadline for the WHOLE scan: the homepage fetch and all
@@ -367,6 +484,7 @@ def scan(url):
               "php_version": None, "version_source": None,
               "cms": [], "cms_info": [], "plugins": [],
               "findings": [], "phpinfo_exposed": False,
+              "dependencies": None,
               "verdict": None,
               "compromise_indicators": []}
     if not home["ok"] and home["status"] is None:
@@ -464,6 +582,22 @@ def scan(url):
     findings += hygiene.header_findings(headers, _fp.scheme)
     findings += hygiene.exposure_probes(_probe, base,
                                          result["cms"])
+
+    # Exposed composer.lock: the exposure is a hygiene finding,
+    # and the locked versions are audited by the dependency
+    # engine and merged into this same report. The read is
+    # bounded (_LOCK_MAX_BODY); test doubles written before the
+    # max_body parameter fall back to the standard cap.
+    def _probe_lock(u):
+        try:
+            return _fetch(u, deadline=end, max_body=_LOCK_MAX_BODY)
+        except TypeError:
+            return _fetch(u, deadline=end)
+
+    lock_info, lock_findings = _exposed_lock(_probe_lock, base,
+                                             offline=offline)
+    result["dependencies"] = lock_info
+    findings += lock_findings
     if result["phpinfo_exposed"]:
         findings.append(hygiene.phpinfo_finding(
             result["signals"].get("phpinfo_path",
@@ -515,6 +649,22 @@ def render_text(r):
         lines.append(f"FINDING [{f['severity'].upper()}]: "
                      f"{f['title']}")
         lines.append(f"             Fix: {f['remediation']}")
+    deps = r.get("dependencies")
+    if deps:
+        total = deps["packages_scanned"] + deps["dev_packages_scanned"]
+        lines.append(f"Dependencies: {total} package(s) audited from "
+                     f"the exposed composer.lock "
+                     f"({deps['source_url']})")
+        for f in deps["findings"]:
+            level = audit.severity_level(f)
+            tag = level.upper() if level else "UNRATED"
+            lines.append(f"  DEP [{tag}]: {f['package']} "
+                         f"{f['version']} — {f['id']}: {f['title']}")
+            lines.append(f"             Fix: {f['remediation']}")
+        if deps["unassessed"]:
+            lines.append(f"  ({len(deps['unassessed'])} package/"
+                         "advisory pair(s) could not be assessed; "
+                         "no verdict is claimed for them.)")
     v = r["verdict"]
     lines.append(f"VERDICT:     {v['status'].upper()}")
     lines.append(f"             {v['detail']}")
