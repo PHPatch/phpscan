@@ -82,7 +82,13 @@ class FakeConn:
         self.req = (method, path)
 
     def getresponse(self):
-        return FakeConn.responder(self)
+        # Dispatch through the instance's own class: a subclass may
+        # carry its own responder (FakePinned does). Hard-coding
+        # FakeConn.responder here made every test share one mutable
+        # class attribute, so the suite's result depended on which
+        # test ran last — green under unittest's alphabetical order,
+        # red under pytest's definition order.
+        return type(self).responder(self)
 
     def close(self):
         pass
