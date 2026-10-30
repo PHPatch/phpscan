@@ -4,6 +4,24 @@ The package version in `pyproject.toml` is 1.4.4. Signed GitHub
 Releases start with 1.4.4; earlier history below is taken from
 the git log.
 
+## Unreleased
+
+- `phpscan hunt <webroot>`: read-only local compromise check.
+  Known webshell fingerprints and filenames (c99, r57, FilesMan,
+  b374k, WSO), backdoor idioms (request-input eval/assert,
+  preg_replace /e, obfuscated decode chains), PHP files inside
+  upload/media/cache dirs, double extensions, hidden PHP
+  dotfiles, and mtime outliers — each finding graded
+  critical/high/medium/low with remediation text; `vendor/`
+  skipped unless `--include-vendor`. Indicators live in
+  `phpscan/data/iocs.json` (patterns + filenames only; the
+  known-bad hash set ships empty because no published hash list
+  had verifiable provenance).
+- External scan: existence-only checks for a short list of
+  famous webshell paths, reported as `compromise_indicators`
+  (indicative, not conclusive) and counted as actionable for
+  the CLI exit code.
+
 ## 1.4.4 — 2026-10-30
 
 - Actionable verdicts (`vulnerable`, `possibly_vulnerable`, `eol`)

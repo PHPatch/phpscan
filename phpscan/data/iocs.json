@@ -1,0 +1,177 @@
+{
+ "version": 1,
+ "updated": "2026-10-30",
+ "provenance": "Content-pattern fingerprints are the ones documented publicly for the named shell families (c99/r57/FilesMan/b374k/WSO write-ups and the PHP Malware Finder project, github.com/jvoisin/php-malware-finder) and for classic PHP backdoor idioms (request-superglobal eval/assert, preg_replace /e, base64/gzinflate eval chains). Filename IOCs are the canonical names those shells ship under. hashes_sha256 is INTENTIONALLY EMPTY in this release: no published webshell-hash list could be fetched with verifiable provenance at build time, and the project's honesty doctrine forbids shipping unverifiable indicator data. Detection is patterns + filenames + heuristics only.",
+ "hashes_sha256": [],
+ "filename_iocs": [
+  {
+   "name": "c99.php",
+   "severity": "critical",
+   "note": "canonical c99 shell filename"
+  },
+  {
+   "name": "c99shell.php",
+   "severity": "critical",
+   "note": "canonical c99 shell filename"
+  },
+  {
+   "name": "r57.php",
+   "severity": "critical",
+   "note": "canonical r57 shell filename"
+  },
+  {
+   "name": "r57shell.php",
+   "severity": "critical",
+   "note": "canonical r57 shell filename"
+  },
+  {
+   "name": "b374k.php",
+   "severity": "critical",
+   "note": "canonical b374k shell filename"
+  },
+  {
+   "name": "wso.php",
+   "severity": "critical",
+   "note": "canonical WSO (Web Shell by Orb) filename"
+  },
+  {
+   "name": "filesman.php",
+   "severity": "critical",
+   "note": "canonical FilesMan shell filename"
+  },
+  {
+   "name": "shell.php",
+   "severity": "high",
+   "note": "generic webshell filename"
+  },
+  {
+   "name": "cmd.php",
+   "severity": "high",
+   "note": "generic command-shell filename"
+  },
+  {
+   "name": "backdoor.php",
+   "severity": "high",
+   "note": "self-describing backdoor filename"
+  },
+  {
+   "name": "hack.php",
+   "severity": "high",
+   "note": "self-describing suspicious filename"
+  },
+  {
+   "name": "x.php",
+   "severity": "medium",
+   "note": "single-letter PHP filename, a common dropper name"
+  },
+  {
+   "name": "1.php",
+   "severity": "medium",
+   "note": "single-digit PHP filename, a common dropper name"
+  }
+ ],
+ "content_patterns": [
+  {
+   "id": "eval-request-input",
+   "regex": "eval\\s*\\(\\s*\\$_(POST|GET|REQUEST|COOKIE|FILES|SERVER)\\b",
+   "severity": "critical",
+   "note": "eval() of raw request input — unambiguous backdoor idiom"
+  },
+  {
+   "id": "assert-request-input",
+   "regex": "assert\\s*\\(\\s*\\$_(POST|GET|REQUEST|COOKIE)\\b",
+   "severity": "critical",
+   "note": "assert() of raw request input (China Chopper-style one-liner)"
+  },
+  {
+   "id": "shell-fingerprint-c99",
+   "regex": "c99shell|c999sh|C99Shell",
+   "severity": "critical",
+   "note": "c99 shell self-identification string"
+  },
+  {
+   "id": "shell-fingerprint-r57",
+   "regex": "r57shell|r57 Shell",
+   "severity": "critical",
+   "note": "r57 shell self-identification string"
+  },
+  {
+   "id": "shell-fingerprint-filesman",
+   "regex": "FilesMan",
+   "severity": "critical",
+   "note": "FilesMan shell self-identification string"
+  },
+  {
+   "id": "shell-fingerprint-b374k",
+   "regex": "b374k",
+   "severity": "critical",
+   "note": "b374k shell self-identification string"
+  },
+  {
+   "id": "shell-fingerprint-wso",
+   "regex": "Web Shell by Orb|WSO\\s+[0-9]+\\.[0-9]+",
+   "severity": "critical",
+   "note": "WSO shell self-identification string"
+  },
+  {
+   "id": "eval-obfuscated-chain",
+   "regex": "eval\\s*\\(\\s*(gzinflate|gzuncompress|str_rot13|base64_decode)\\s*\\(",
+   "severity": "high",
+   "note": "eval() of a decode/decompress chain — classic obfuscated payload delivery"
+  },
+  {
+   "id": "decode-of-request-input",
+   "regex": "base64_decode\\s*\\(\\s*\\$_(POST|GET|REQUEST|COOKIE)\\b",
+   "severity": "high",
+   "note": "request input fed straight into base64_decode — dropper idiom"
+  },
+  {
+   "id": "preg-replace-e-modifier",
+   "regex": "preg_replace\\s*\\(\\s*['\"][^'\"]*/e['\"]",
+   "severity": "medium",
+   "note": "preg_replace /e modifier (removed in PHP 7) — code execution by regex, common in older shells"
+  },
+  {
+   "id": "create-function-request",
+   "regex": "create_function\\s*\\([^)]*\\$_(POST|GET|REQUEST|COOKIE)\\b",
+   "severity": "high",
+   "note": "create_function() built from request input"
+  },
+  {
+   "id": "eval-plain",
+   "regex": "eval\\s*\\(",
+   "severity": "low",
+   "note": "eval() usage — appears in some legitimate libraries; review, do not panic"
+  }
+ ],
+ "special_dirs": [
+  "uploads",
+  "upload",
+  "media",
+  "files",
+  "cache",
+  "tmp",
+  "temp",
+  "attachments",
+  "images",
+  "img",
+  "userfiles"
+ ],
+ "remote_paths": [
+  "/c99.php",
+  "/r57.php",
+  "/shell.php",
+  "/cmd.php",
+  "/wso.php",
+  "/b374k.php",
+  "/alfacgiapi/perl.pl",
+  "/wp-content/uploads/shell.php",
+  "/wp-content/uploads/cmd.php",
+  "/images/shell.php",
+  "/upload/shell.php",
+  "/uploads/shell.php",
+  "/files/shell.php",
+  "/tmp/shell.php"
+ ],
+ "remote_note": "Remote mode is indicative, not conclusive: a 200 on one of these paths means a file with a known shell name answers in public. It can be a honeypot, a scanner artifact, or a coincidence — and a compromised site usually shows nothing here at all. Confirm with the local hunt on the server before concluding anything."
+}

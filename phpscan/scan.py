@@ -349,7 +349,8 @@ def scan(url):
               "http_status": home["status"], "final_url": home["final_url"],
               "error": home.get("error"), "signals": {},
               "php_version": None, "version_source": None,
-              "cms": [], "phpinfo_exposed": False, "verdict": None}
+              "cms": [], "phpinfo_exposed": False, "verdict": None,
+              "compromise_indicators": []}
     if not home["ok"] and home["status"] is None:
         result["verdict"] = {"status": "unreachable",
                              "detail": f"Site did not answer: "
@@ -420,6 +421,14 @@ def scan(url):
                 raw_version_text = vm.group(0)
             break
 
+    # Compromise light-check — existence only: a short list of
+    # famous webshell paths, probed through the same guarded
+    # fetch. A 200 is an indicator to investigate with the local
+    # `phpscan hunt`, never a conclusion on its own.
+    from . import hunt as _hunt
+    result["compromise_indicators"] = _hunt.remote_indicators(
+        _fetch, base, deadline=end)
+
     vtuple = versioning.parse_version(result["php_version"])
     if vtuple:
         result["verdict"] = versioning.verdict_for(
@@ -451,6 +460,10 @@ def render_text(r):
                      f"(via {r['version_source']})")
     if r["phpinfo_exposed"]:
         lines.append("!! phpinfo page is publicly exposed — remove it.")
+    for ind in r.get("compromise_indicators") or []:
+        lines.append(f"!! Possible compromise indicator: {ind['path']} "
+                     "answers in public. Indicative only — confirm "
+                     "with `phpscan hunt` on the server.")
     v = r["verdict"]
     lines.append(f"VERDICT:     {v['status'].upper()}")
     lines.append(f"             {v['detail']}")

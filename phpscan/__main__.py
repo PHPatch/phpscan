@@ -2,6 +2,10 @@
 
 Prints one JSON verdict object per URL.
 
+Also: python3 -m phpscan hunt <webroot> [--include-vendor] —
+read-only local compromise check (see phpscan/hunt.py); its
+exit codes are 0 clean, 1 findings, 2 usage error.
+
 Exit codes: 0 — scanned, no actionable finding; 1 — at least one
 target is vulnerable, possibly vulnerable, or on an end-of-life
 branch; 2 — usage error, or a target could not be judged at all:
@@ -27,12 +31,17 @@ def main(argv):
     if any(a in ("-h", "--help") for a in argv):
         print(__doc__)
         return 0
+    if argv[0] == "hunt":
+        from .hunt import hunt_main
+        return hunt_main(argv[1:])
     worst = 0
     for url in argv:
         try:
             r = scan(url)
             print(json.dumps(r, indent=1))
             status = (r.get("verdict") or {}).get("status")
+            if r.get("compromise_indicators"):
+                worst = max(worst, 1)
             if status in _ACTIONABLE:
                 worst = max(worst, 1)
             elif status in _UNJUDGED:
