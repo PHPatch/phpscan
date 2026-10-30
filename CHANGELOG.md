@@ -1,10 +1,12 @@
 # Changelog
 
-The package version in `pyproject.toml` is 1.4.4. Signed GitHub
+The package version in `pyproject.toml` is 1.5.0. Signed GitHub
 Releases start with 1.4.4; earlier history below is taken from
 the git log.
 
 ## Unreleased
+
+## 1.5.0 — 2026-10-30
 
 - `phpscan hunt <webroot>`: read-only local compromise check.
   Known webshell fingerprints and filenames (c99, r57, FilesMan,
