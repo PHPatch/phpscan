@@ -33,12 +33,12 @@ _PHPINFO_PATHS = ("/phpinfo.php", "/info.php", "/php-info.php", "/test.php")
 # minute, server-side. Carried on the verdict as `remediation` +
 # `next_steps` (JSON) and rendered as the "If this is your site"
 # block in the text output.
-_HIDDEN_REMEDIATION = "Version not disclosed — if this is your site, check the version server-side (php -v, your hosting panel, or a temporary phpinfo page you delete immediately after), then verify it against the PHPatch advisory feed."
+_HIDDEN_REMEDIATION = "Version not disclosed — if this is your site, check the version server-side (php -v, your hosting panel, or a temporary phpinfo page you delete immediately after), then verify it against the PHPatch advisory feed. Full guide: https://phpatch.com/guides/version-hidden"
 _HIDDEN_NEXT_STEPS = [
     "SSH or terminal: run `php -v` (note: CLI and web PHP can differ on some hosts — the panel method below shows the web version).",
     "Hosting panel: cPanel → MultiPHP Manager or 'Select PHP Version'; Plesk → Websites & Domains → PHP Settings — both show the PHP version serving your site.",
     "Temporary phpinfo: create check.php containing <?php phpinfo(); in your web root, open it in a browser, note the version, then DELETE the file immediately — a leftover phpinfo page is itself a serious exposure (phpscan flags it).",
-    "Check the version against current advisories: https://phpatch.com/feeds/php-advisories.json (or the version checker at https://phpatch.com/scan).",
+    "Follow the full walkthrough: https://phpatch.com/guides/version-hidden — it covers checking your version against current advisories (feed: https://phpatch.com/feeds/php-advisories.json) and what to do if it's end-of-life.",
     "If the version is end-of-life or has known vulnerabilities, upgrade it or have it patched — see https://phpatch.com/patch.",
 ]
 _HIDDEN_NOT_YOURS = "Not your site? A hidden version can't be assessed externally — that's by design, and it is not evidence the site is vulnerable."

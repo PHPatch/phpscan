@@ -16,8 +16,10 @@ the git log.
   end-of-life or vulnerable), and the text output renders the
   same steps as an "If this is your site" block, closing with a
   reminder that a hidden version is not evidence a site is
-  vulnerable. Additive only — no verdict label or other
-  verdict's text changed.
+  vulnerable. The remediation ends with, and step 4 points to,
+  the full walkthrough at
+  https://phpatch.com/guides/version-hidden. Additive only —
+  no verdict label or other verdict's text changed.
 
 ## 1.5.0 — 2026-10-30
 
