@@ -6,6 +6,19 @@ the git log.
 
 ## Unreleased
 
+- VERSION HIDDEN verdicts (status `indeterminate`) now carry
+  owner self-check guidance instead of ending at "cannot be
+  confirmed from outside": the JSON verdict gains a one-line
+  `remediation` and a `next_steps` list (check the version
+  server-side via `php -v`, the hosting panel, or a temporary
+  phpinfo page that must be deleted immediately; verify it
+  against the public advisory feed; upgrade or patch if it is
+  end-of-life or vulnerable), and the text output renders the
+  same steps as an "If this is your site" block, closing with a
+  reminder that a hidden version is not evidence a site is
+  vulnerable. Additive only — no verdict label or other
+  verdict's text changed.
+
 ## 1.5.0 — 2026-10-30
 
 - `phpscan hunt <webroot>`: read-only local compromise check.

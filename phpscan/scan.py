@@ -27,6 +27,22 @@ _MAX_BODY = 512 * 1024
 _MAX_REDIRECTS = 5
 _PHPINFO_PATHS = ("/phpinfo.php", "/info.php", "/php-info.php", "/test.php")
 
+# Owner self-check guidance for the VERSION HIDDEN verdict
+# (status "indeterminate"): the scan cannot assess a version the
+# site does not disclose, but the site's owner can — in about a
+# minute, server-side. Carried on the verdict as `remediation` +
+# `next_steps` (JSON) and rendered as the "If this is your site"
+# block in the text output.
+_HIDDEN_REMEDIATION = "Version not disclosed — if this is your site, check the version server-side (php -v, your hosting panel, or a temporary phpinfo page you delete immediately after), then verify it against the PHPatch advisory feed."
+_HIDDEN_NEXT_STEPS = [
+    "SSH or terminal: run `php -v` (note: CLI and web PHP can differ on some hosts — the panel method below shows the web version).",
+    "Hosting panel: cPanel → MultiPHP Manager or 'Select PHP Version'; Plesk → Websites & Domains → PHP Settings — both show the PHP version serving your site.",
+    "Temporary phpinfo: create check.php containing <?php phpinfo(); in your web root, open it in a browser, note the version, then DELETE the file immediately — a leftover phpinfo page is itself a serious exposure (phpscan flags it).",
+    "Check the version against current advisories: https://phpatch.com/feeds/php-advisories.json (or the version checker at https://phpatch.com/scan).",
+    "If the version is end-of-life or has known vulnerabilities, upgrade it or have it patched — see https://phpatch.com/patch.",
+]
+_HIDDEN_NOT_YOURS = "Not your site? A hidden version can't be assessed externally — that's by design, and it is not evidence the site is vulnerable."
+
 
 class BlockedTarget(Exception):
     """Target refused by the scanner's SSRF/abuse policy."""
@@ -440,7 +456,9 @@ def scan(url):
             "detail": "PHP is present (fingerprinted) but the version is "
                       "not disclosed, so the patch status cannot be "
                       "confirmed from outside. Run the deep check (SSH, "
-                      "read-only) for a definitive verdict."}
+                      "read-only) for a definitive verdict.",
+            "remediation": _HIDDEN_REMEDIATION,
+            "next_steps": list(_HIDDEN_NEXT_STEPS)}
     else:
         result["verdict"] = {
             "status": "no_php_detected",
@@ -477,4 +495,8 @@ def render_text(r):
                      "root@your-server")
         lines.append("             Site ownership is verified before "
                      "any deeper check. This scan used passive fingerprinting and limited, read-only path checks only — no exploit probes.")
+        lines.append("             If this is your site:")
+        for i, step in enumerate(_HIDDEN_NEXT_STEPS, 1):
+            lines.append(f"               {i}. {step}")
+        lines.append(f"             {_HIDDEN_NOT_YOURS}")
     return "\n".join(lines)
