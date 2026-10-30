@@ -4,8 +4,17 @@ A PHP build is judged against every advisory in data/cves.json. For each
 advisory, supported branches have a fixed-release floor; anything older
 is vulnerable, and any branch below the advisory's EOL line has no fix at
 all (branch upgrade or offline are the only remedies).
+
+The database holds one entry per PHP core CVE (plus hand-curated
+bundles such as php2shell), so a version is normally judged against
+hundreds of advisories at once: the verdict aggregates every match —
+the headline is the most severe, the floor it names is the highest
+fixed release for the branch (a branch's security releases are
+cumulative, so that one upgrade addresses every fixable match), and
+`findings` lists them all.
 """
 
+import functools
 import json
 import os
 import re
@@ -14,9 +23,19 @@ _DATA = os.path.join(os.path.dirname(__file__), "data", "cves.json")
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
 
 
-def load_advisories():
+@functools.lru_cache(maxsize=1)
+def _load_cached():
     with open(_DATA, encoding="utf-8") as f:
         return json.load(f)["advisories"]
+
+
+def load_advisories():
+    return _load_cached()
+
+
+def _score(adv):
+    return (adv.get("cvss_v4") or adv.get("cvss_v3")
+            or adv.get("cvss_v2"))
 
 
 def parse_version(text):
@@ -49,7 +68,7 @@ def distro_build(text):
     return bool(text and _DISTRO_RE.search(str(text)))
 
 
-def verdict_for(version, distro=False):
+def verdict_for(version, distro=False, advisories=None):
     """Return a verdict dict for one PHP version tuple.
 
     status: 'patched' | 'vulnerable' | 'possibly_vulnerable' |
@@ -61,14 +80,23 @@ def verdict_for(version, distro=False):
       eol        — branch is below an advisory's EOL line: no fix exists
       not_assessed — branch is newer than the advisory database
       unknown    — version could not be determined
+
+    With more than one matching advisory, the verdict also carries
+    `findings`: every match, worst first, each with its own floor
+    (or None where the branch has no fix for that advisory).
     """
     if version is None:
         return {"status": "unknown", "version": None, "branch": None,
                 "detail": "PHP version could not be determined."}
+    if advisories is None:
+        advisories = load_advisories()
     branch = branch_of(version)
-    problems = []
-    assessed = False
-    for adv in load_advisories():
+
+    # Curated advisories (no no_fix_branches field) keep the original
+    # blunt EOL semantics: a branch below their EOL line has no fix.
+    for adv in advisories:
+        if "no_fix_branches" in adv:
+            continue
         eol_below = parse_version(adv["eol_below"])
         if (version[0], version[1]) < (eol_below[0], eol_below[1]):
             detail = (f"Branch {branch} is end-of-life for "
@@ -90,20 +118,52 @@ def verdict_for(version, distro=False):
                     "remediation": ("Upgrade to a supported PHP branch "
                                     "(8.2 or later) and apply its patched "
                                     "release, or take the site offline.")}
+
+    problems, unpatched, assessed = [], [], False
+    for adv in advisories:
         floor_txt = adv["fixed_releases"].get(branch)
-        if floor_txt is None:
-            continue  # branch newer than the advisory knows
-        assessed = True
-        floor = parse_version(floor_txt)
-        if version < floor:
-            problems.append({"advisory": adv["id"], "cves": adv["cves"],
-                             "cvss_v4": adv.get("cvss_v4"),
-                             "floor": floor_txt})
+        if floor_txt is not None:
+            assessed = True
+            floor = parse_version(floor_txt)
+            if version < floor:
+                problems.append({"advisory": adv["id"],
+                                 "title": adv.get("title"),
+                                 "cves": adv["cves"],
+                                 "cvss": _score(adv),
+                                 "floor": floor_txt,
+                                 "published": adv.get("published", "")})
+        if branch in adv.get("no_fix_branches", []):
+            assessed = True
+            unpatched.append({"advisory": adv["id"],
+                              "title": adv.get("title"),
+                              "cves": adv["cves"],
+                              "cvss": _score(adv),
+                              "floor": None, "no_fix": True,
+                              "published": adv.get("published", ""),
+                              "fixed_elsewhere":
+                                  bool(adv["fixed_releases"])})
+    problems.sort(key=lambda p: (p["cvss"] or 0, p["published"]),
+                  reverse=True)
+    unpatched.sort(key=lambda p: (p["cvss"] or 0, p["published"]),
+                   reverse=True)
+
     if problems:
         p = problems[0]
+        eff_floor = max(problems,
+                        key=lambda q: parse_version(q["floor"]))["floor"]
         detail = (f"PHP {fmt(version)} is below the patched "
-                  f"release {p['floor']} for branch {branch} "
+                  f"release {eff_floor} for branch {branch} "
                   f"({', '.join(p['cves'])}).")
+        if len(problems) > 1:
+            detail += (f" {len(problems)} advisories in the database "
+                       f"affect this version; upgrading to {eff_floor} "
+                       "addresses every one that has a fix.")
+        if unpatched:
+            detail += (f" Note: {len(unpatched)} further "
+                       f"advisor{'y' if len(unpatched) == 1 else 'ies'} "
+                       f"affecting branch {branch} "
+                       f"{'has' if len(unpatched) == 1 else 'have'} no "
+                       "patched release for this branch at all.")
         if distro:
             detail += (" This build looks like a distribution "
                        "package: distros backport security fixes "
@@ -111,18 +171,64 @@ def verdict_for(version, distro=False):
                        "treat this as a check signal, not proof — "
                        "confirm via the distro security tracker or "
                        "the on-server deep check.")
-        remediation = (f"Upgrade PHP {branch} to {p['floor']} or later.")
+        remediation = (f"Upgrade PHP {branch} to {eff_floor} or later.")
         if distro:
             remediation += (" Confirm via the distro security tracker "
                             "that a backported fix is installed — a "
                             "distribution package may already be patched.")
+        head = next(a for a in advisories if a["id"] == p["advisory"])
         return {"status": "possibly_vulnerable" if distro
                 else "vulnerable",
                 "version": fmt(version),
                 "branch": branch, "advisory": p["advisory"],
-                "cves": p["cves"], "cvss_v4": p.get("cvss_v4"),
-                "floor": p["floor"], "detail": detail,
-                "remediation": remediation}
+                "cves": p["cves"],
+                "cvss_v4": head.get("cvss_v4"),
+                "cvss_v3": head.get("cvss_v3"),
+                "floor": eff_floor, "detail": detail,
+                "remediation": remediation,
+                "findings": problems + unpatched}
+    if unpatched:
+        p = unpatched[0]
+        findings = unpatched
+        if p["fixed_elsewhere"]:
+            detail = (f"Branch {branch} receives no fix for "
+                      f"{p['advisory']} ({p['title']}): the patched "
+                      "releases exist only on newer branches, so this "
+                      "branch is end-of-life for this advisory.")
+            if distro:
+                detail += (" This build looks like a distribution "
+                           "package: the distro may still backport "
+                           "fixes for this branch, so confirm via "
+                           "the distro security tracker or the "
+                           "on-server deep check.")
+            return {"status": "eol", "version": fmt(version),
+                    "branch": branch, "advisory": p["advisory"],
+                    "cves": p["cves"], "detail": detail,
+                    "remediation": ("Upgrade to a supported PHP branch "
+                                    "and apply its patched release, or "
+                                    "take the site offline."),
+                    "findings": findings}
+        detail = (f"PHP {fmt(version)} is affected by {p['advisory']} "
+                  f"({p['title']}), for which no patched release "
+                  "exists on any branch yet.")
+        if distro:
+            detail += (" This build looks like a distribution "
+                       "package: distros backport security fixes "
+                       "without changing the upstream version, so "
+                       "treat this as a check signal, not proof — "
+                       "confirm via the distro security tracker or "
+                       "the on-server deep check.")
+        return {"status": "possibly_vulnerable" if distro
+                else "vulnerable",
+                "version": fmt(version),
+                "branch": branch, "advisory": p["advisory"],
+                "cves": p["cves"], "cvss_v4": None, "cvss_v3": None,
+                "floor": None, "detail": detail,
+                "remediation": ("No patched release exists yet. "
+                                "Restrict access to the site and watch "
+                                "for the next PHP security release on "
+                                f"branch {branch}."),
+                "findings": findings}
     if not assessed:
         return {"status": "not_assessed", "version": fmt(version),
                 "branch": branch,
@@ -138,13 +244,13 @@ def verdict_for(version, distro=False):
                       "not a general security guarantee."}
 
 
-def fixed_tag_for(version, variant):
+def fixed_tag_for(version, variant, advisories=None):
     """Official docker php image tag for the patched release of a branch.
 
     e.g. version (8,3,35), variant 'apache' -> 'php:8.3.36-apache'
     Returns None when no advisory floor applies.
     """
-    v = verdict_for(version)
+    v = verdict_for(version, advisories=advisories)
     if v["status"] in ("vulnerable", "possibly_vulnerable"):
         return f"php:{v['floor']}-{variant}"
     if v["status"] == "patched":

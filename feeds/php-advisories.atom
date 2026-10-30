@@ -1,0 +1,459 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>PHPatch — PHP core security advisories</title>
+<id>https://phpatch.com/feeds/php-advisories</id>
+<updated>2026-10-30T00:00:00Z</updated>
+<link rel="self" href="https://phpatch.com/feeds/php-advisories.xml"/>
+<link rel="alternate" href="https://phpatch.com/"/>
+<author><name>PHPatch</name></author>
+<entry>
+<title>php2shell-2026-10 — php2shell — unauthenticated remote code execution in PHP core</title>
+<id>urn:phpatch:advisory:php2shell-2026-10</id>
+<link href="https://www.php.net/releases/"/>
+<published>2026-10-21T00:00:00Z</published>
+<updated>2026-10-21T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>Two critical flaws in PHP core: CVE-2026-109618 (remote code execution via out-of-memory corruption) and CVE-2026-109619 (remote code execution via stale global state). Both are exploitable over the network with no authentication. Any PHP application on a vulnerable build is exposed, regardless of the application itself. Fixed in: 8.2 8.2.35, 8.3 8.3.36, 8.4 8.4.27, 8.5 8.5.12. CVSS: 9.2.</summary>
+</entry>
+<entry>
+<title>CVE-2026-91765 — cleanup_xml_node() in the SOAP XML parser recurses once per XML nesting level with no depth limit.</title>
+<id>urn:phpatch:advisory:CVE-2026-91765</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-91765"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>cleanup_xml_node() in the SOAP XML parser recurses once per XML nesting level with no depth limit. An unauthenticated attacker can post a SOAP request containing tens of thousands of nested elements to any SoapServer endpoint, exhaust the stack and crash the process. The same unbounded recursion exists in the SOAP value decoder and in the WSDL node search helper. Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 7.5.</summary>
+</entry>
+<entry>
+<title>CVE-2026-17545 — On Windows, PHP's filesystem and stream APIs do not reject reserved device names such as CON, PRN, AUX,…</title>
+<id>urn:phpatch:advisory:CVE-2026-17545</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-17545"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>On Windows, PHP's filesystem and stream APIs do not reject reserved device names such as CON, PRN, AUX, NUL, COM1 to COM9, LPT1 to LPT9, CONIN$ and CONOUT$ when they appear as a component of a path. An attacker-controlled filename therefore reaches CreateFileW() and opens a device instead of the regular file the application expected, which can block or hang the request and exhaust worker processes. Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 6.9.</summary>
+</entry>
+<entry>
+<title>CVE-2025-14181 — The SOAP HTTP client guards its response buffer growth with a check that relies on signed integer…</title>
+<id>urn:phpatch:advisory:CVE-2025-14181</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-14181"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>The SOAP HTTP client guards its response buffer growth with a check that relies on signed integer overflow, which is undefined behaviour and is not guaranteed to trigger. When the check is optimised away, a malicious SOAP server can make the client allocate a buffer far smaller than the data it then writes into it, producing a heap buffer overflow. Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 6.5.</summary>
+</entry>
+<entry>
+<title>CVE-2026-91767 — php_openssl_matches_wildcard_name() in ext/openssl/xp_ssl.c underflows the length argument passed to…</title>
+<id>urn:phpatch:advisory:CVE-2026-91767</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-91767"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>php_openssl_matches_wildcard_name() in ext/openssl/xp_ssl.c underflows the length argument passed to memchr() when a TLS server certificate presents a wildcard name whose literal characters are together longer than the hostname being verified. A malicious server presenting such a certificate makes the PHP client read up to SIZE_MAX bytes past the end of a heap allocation. The path is reachable from any default client stream, because verify_peer_name is enabled by default. Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 6.5.</summary>
+</entry>
+<entry>
+<title>CVE-2026-91768 — The IPv6 branch of the FastCGI client access check compares only the first 12 bytes of a 16-byte IPv6…</title>
+<id>urn:phpatch:advisory:CVE-2026-91768</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-91768"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>The IPv6 branch of the FastCGI client access check compares only the first 12 bytes of a 16-byte IPv6 address, so listen.allowed_clients matches on a /96 prefix instead of the exact address. An attacker who can source an address sharing the first 96 bits with an allowed one passes the check and reaches the FastCGI endpoint. Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 6.5.</summary>
+</entry>
+<entry>
+<title>CVE-2026-91766 — When the http:// stream wrapper follows a redirect it forwards the user-supplied Authorization, Cookie and…</title>
+<id>urn:phpatch:advisory:CVE-2026-91766</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-91766"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>When the http:// stream wrapper follows a redirect it forwards the user-supplied Authorization, Cookie and Proxy-Authorization headers unchanged, even when the redirect target is a different host, a different port, or a downgrade from HTTPS to HTTP. A server that can steer a redirect therefore receives credentials that were only meant for the original origin. This is the same class of issue that libcurl fixed in 7.58.0 ( CVE-2018-1000007 https://github.com/advisories/GHSA-g7x2-hrfp-pv5f ). Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 5.9.</summary>
+</entry>
+<entry>
+<title>CVE-2026-92842 — The convert.base64-encode, convert.quoted-printable-encode and convert.quoted-printable-decode stream…</title>
+<id>urn:phpatch:advisory:CVE-2026-92842</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-92842"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>The convert.base64-encode, convert.quoted-printable-encode and convert.quoted-printable-decode stream filters accept a line-break-chars option whose length is tracked separately from the string itself. The filter constructors duplicate the value with pestrdup(), which stops at the first NUL byte, while keeping the original length. When the filter later emits a line break it copies the recorded length out of the truncated allocation, reading past its end and placing adjacent heap bytes into… Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 5.9.</summary>
+</entry>
+<entry>
+<title>CVE-2026-93682 — When the HTTP stream wrapper follows a redirect and the response carries a Location header with an empty…</title>
+<id>urn:phpatch:advisory:CVE-2026-93682</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-93682"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>When the HTTP stream wrapper follows a redirect and the response carries a Location header with an empty value, the redirect code reads one byte past the end of the heap buffer holding the location. The value of that out-of-bounds byte decides which redirect target is built, so a malicious server controls whether the client is sent to the host root or to the current directory. Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 5.8.</summary>
+</entry>
+<entry>
+<title>CVE-2026-6103 — phar_tar_number() parses the octal size field of a TAR header into a uint32_t with no overflow check.</title>
+<id>urn:phpatch:advisory:CVE-2026-6103</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-6103"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>phar_tar_number() parses the octal size field of a TAR header into a uint32_t with no overflow check. The field is 11 octal digits wide and holds values up to 0x1FFFFFFFF, so a size above 0xFFFFFFFF silently wraps. The parser then skips the wrong number of data blocks and interprets attacker-controlled file content as the next TAR header, which lets a crafted archive inject entries that PharData reports and extracts as if they were genuine. Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 4.3.</summary>
+</entry>
+<entry>
+<title>CVE-2026-91769 — PHP's OpenSSL stream peer verification checks the certificate's subjectAltName entries first and, whenever…</title>
+<id>urn:phpatch:advisory:CVE-2026-91769</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-91769"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>PHP's OpenSSL stream peer verification checks the certificate's subjectAltName entries first and, whenever no entry matches, falls back to the Common Name. RFC 6125 requires the CN to be ignored once the certificate presents any service identity, so a certificate carrying a non-matching DNS SAN was still accepted when its CN matched the requested peer_name. A certificate trusted by the client for one name can therefore be used to impersonate another. Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 4.3.</summary>
+</entry>
+<entry>
+<title>CVE-2025-1218 — The mysqlnd wire protocol parser reads fields out of server packets before checking that the packet still…</title>
+<id>urn:phpatch:advisory:CVE-2025-1218</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-1218"/>
+<published>2026-09-24T00:00:00Z</published>
+<updated>2026-09-24T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>The mysqlnd wire protocol parser reads fields out of server packets before checking that the packet still holds enough bytes for them. A malicious or compromised MySQL server can send a truncated packet and make the client read past the end of the packet buffer, which is undefined behaviour and can crash the process. Fixed in: 8.2 8.2.34, 8.3 8.3.35, 8.4 8.4.26, 8.5 8.5.11. CVSS: 3.4.</summary>
+</entry>
+<entry>
+<title>CVE-2026-17543 — Improper escaping of backslashes in attacker-provided parameters would allow for trivial SQL injection in…</title>
+<id>urn:phpatch:advisory:CVE-2026-17543</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-17543"/>
+<published>2026-07-30T00:00:00Z</published>
+<updated>2026-07-30T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>Improper escaping of backslashes in attacker-provided parameters would allow for trivial SQL injection in PHP versions from 8.2.* before 8.2.33, from 8.3.* before 8.3.33, from 8.4.* before 8.4.24, and from 8.5.* before 8.5.9. Fixed in: 8.2 8.2.33, 8.3 8.3.33, 8.4 8.4.24, 8.5 8.5.9. CVSS: 8.1.</summary>
+</entry>
+<entry>
+<title>CVE-2026-17544 — Attacker-provided inputs to bccomp() could lead to an out-of-bounds write with stack and heap corruption…</title>
+<id>urn:phpatch:advisory:CVE-2026-17544</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-17544"/>
+<published>2026-07-30T00:00:00Z</published>
+<updated>2026-07-30T00:00:00Z</updated>
+<category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>Attacker-provided inputs to bccomp() could lead to an out-of-bounds write with stack and heap corruption in PHP versions from 8.4.* before 8.4.24 and from 8.5.* before 8.5.9. Fixed in: 8.4 8.4.24, 8.5 8.5.9. CVSS: 8.1.</summary>
+</entry>
+<entry>
+<title>CVE-2026-7260 — Circular symbolic links in phar archives could lead to unbounded recursion, exhausting the C stack and…</title>
+<id>urn:phpatch:advisory:CVE-2026-7260</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-7260"/>
+<published>2026-07-30T00:00:00Z</published>
+<updated>2026-07-30T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>Circular symbolic links in phar archives could lead to unbounded recursion, exhausting the C stack and crashing the PHP process, in PHP versions from 8.2.* before 8.2.33, from 8.3.* before 8.3.33, from 8.4.* before 8.4.24, and from 8.5.* before 8.5.9. Fixed in: 8.2 8.2.33, 8.3 8.3.33, 8.4 8.4.24, 8.5 8.5.9. CVSS: 5.4.</summary>
+</entry>
+<entry>
+<title>CVE-2026-14355 — In PHP versions 8.2.* before 8.2.32, 8.3.* before 8.3.32, 8.4.* before 8.4.23, 8.5.* before 8.5.8, the…</title>
+<id>urn:phpatch:advisory:CVE-2026-14355</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-14355"/>
+<published>2026-07-02T00:00:00Z</published>
+<updated>2026-07-02T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.2.* before 8.2.32, 8.3.* before 8.3.32, 8.4.* before 8.4.23, 8.5.* before 8.5.8, the AES-WRAP-PAD algorithm implementation in OpenSSL extension contains a buffer allocation flaw. The output buffer for the AES key-wrap-with-padding operation is sized from the plaintext length without accounting for RFC 5649 expansion. This may cause OpenSSL to write beyond allocated memory, corrupting heap metadata and triggering application abort. Fixed in: 8.2 8.2.32, 8.3 8.3.32, 8.4 8.4.23, 8.5 8.5.8. CVSS: 5.6.</summary>
+</entry>
+<entry>
+<title>CVE-2026-6722 — In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the…</title>
+<id>urn:phpatch:advisory:CVE-2026-6722</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-6722"/>
+<published>2026-05-07T00:00:00Z</published>
+<updated>2026-05-07T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the SOAP extension's object deduplication mechanism stores pointers to PHP objects in a global map without incrementing their reference counts. When an apache:Map node contains duplicate keys, processing the second entry overwrites the first in the temporary result map, freeing the original PHP object while its stale pointer remains in the map. A subsequent href reference to the freed node… Fixed in: 8.2 8.2.31, 8.3 8.3.31, 8.4 8.4.21, 8.5 8.5.6. CVSS: 9.5.</summary>
+</entry>
+<entry>
+<title>CVE-2025-14179 — In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the…</title>
+<id>urn:phpatch:advisory:CVE-2025-14179</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-14179"/>
+<published>2026-05-07T00:00:00Z</published>
+<updated>2026-05-07T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the PDO Firebird driver improperly handles NUL bytes when preparing SQL queries. During token-by-token query construction, a string token containing a NUL byte is copied via strncat(), which stops at the NUL byte, dropping the closing quote and causing subsequent SQL tokens to be interpreted as part of the string. This allows SQL injection when attacker-controlled values are quoted via… Fixed in: 8.2 8.2.31, 8.3 8.3.31, 8.4 8.4.21, 8.5 8.5.6. CVSS: 7.4.</summary>
+</entry>
+<entry>
+<title>CVE-2026-6735 — In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, 8.5.* before 8.5.6, due to…</title>
+<id>urn:phpatch:advisory:CVE-2026-6735</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-6735"/>
+<published>2026-05-07T00:00:00Z</published>
+<updated>2026-05-07T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, 8.5.* before 8.5.6, due to improper sanitation of user data, it allows an attacker to compose an URL, which will cause the target to execute arbitrary JavaScript code (XSS) on the target's machine when the target is viewing the PHP-FPM status page. Fixed in: 8.2 8.2.31, 8.3 8.3.31, 8.4 8.4.21, 8.5 8.5.6. CVSS: 7.3.</summary>
+</entry>
+<entry>
+<title>CVE-2026-7261 — In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6,…</title>
+<id>urn:phpatch:advisory:CVE-2026-7261</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-7261"/>
+<published>2026-05-07T00:00:00Z</published>
+<updated>2026-05-07T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, when SoapServer is configured with SOAP_PERSISTENCE_SESSION, the handler object is persisted across requests via session storage. However, in the case SOAP requests results in an error, the persistance is handled incorrectly, resulting in freeing the object while keeping a pointer to it, which may lead to use-after-free. This may lead to memory corruption, information disclosure, or process… Fixed in: 8.2 8.2.31, 8.3 8.3.31, 8.4 8.4.21, 8.5 8.5.6. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2026-7568 — In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the…</title>
+<id>urn:phpatch:advisory:CVE-2026-7568</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-7568"/>
+<published>2026-05-07T00:00:00Z</published>
+<updated>2026-05-07T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the metaphone() function in ext/standard/metaphone.c uses a signed int variable to track the current position within the input string. If a string longer than 2,147,483,647 bytes is passed, a signed integer overflow occurs, resulting in undefined behavior. This can lead to an out-of-bounds read, causing a segmentation fault or access to unrelated memory, and may affect the availability of… Fixed in: 8.2 8.2.31, 8.3 8.3.31, 8.4 8.4.21, 8.5 8.5.6. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2026-6104 — In PHP versions 8.4.* before 8.4.21 and 8.5.* before 8.5.6, when an encoding name containing an embedded…</title>
+<id>urn:phpatch:advisory:CVE-2026-6104</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-6104"/>
+<published>2026-05-07T00:00:00Z</published>
+<updated>2026-05-07T00:00:00Z</updated>
+<category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.4.* before 8.4.21 and 8.5.* before 8.5.6, when an encoding name containing an embedded NUL byte is passed to mb_convert_encoding() or related mbstring functions, the code incorrectly assumes that when strncasecmp() returns 0 it means the strings have the same length. This can lead to out-of-bounds read of global memory, potentially causing a crash or information disclosure or crash. Affected functions include mb_convert_encoding(), mb_detect_encoding(),… Fixed in: 8.4 8.4.21, 8.5 8.5.6. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2026-7263 — In PHP versions 8.4.* before 8.4.21 and 8.5.* before 8.5.6, DOMNode::C14N() method may process the XML…</title>
+<id>urn:phpatch:advisory:CVE-2026-7263</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-7263"/>
+<published>2026-05-07T00:00:00Z</published>
+<updated>2026-05-07T00:00:00Z</updated>
+<category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.4.* before 8.4.21 and 8.5.* before 8.5.6, DOMNode::C14N() method may process the XML data incorrectly, causing a circular linked list in the data structure representing the XML document. This may cause subsequent processing of the XML document to enter infinite loop, causing denial of service in the processing application. Fixed in: 8.4 8.4.21, 8.5 8.5.6. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2026-7262 — In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6,…</title>
+<id>urn:phpatch:advisory:CVE-2026-7262</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-7262"/>
+<published>2026-05-07T00:00:00Z</published>
+<updated>2026-05-07T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, when a SOAP server has a typemap configured, the decoding process contains a mistake which checks the wrong variable in case of missing value element. This leads to dereferences a NULL pointer, causing a segmentation fault. This allows a remote unauthenticated attacker to crash the PHP SOAP server process, resulting in denial of service. Fixed in: 8.2 8.2.31, 8.3 8.3.31, 8.4 8.4.21, 8.5 8.5.6. CVSS: 2.9.</summary>
+</entry>
+<entry>
+<title>CVE-2026-7259 — In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, a…</title>
+<id>urn:phpatch:advisory:CVE-2026-7259</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-7259"/>
+<published>2026-05-07T00:00:00Z</published>
+<updated>2026-05-07T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, a mismatch between encoding lists in Oniguruma and mbfl leads to a NULL pointer dereference, resulting in a segmentation fault and denial of service. The vulnerability is exploitable when user-controlled input can influence the encoding passed to mb_regex_encoding(). Fixed in: 8.2 8.2.31, 8.3 8.3.31, 8.4 8.4.21, 8.5 8.5.6. CVSS: 2.1.</summary>
+</entry>
+<entry>
+<title>CVE-2025-14180 — In PHP versions 8.1.* before 8.1.34, 8.2.* before 8.2.30, 8.3.* before 8.3.29, 8.4.* before 8.4.16, 8.5.*…</title>
+<id>urn:phpatch:advisory:CVE-2025-14180</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-14180"/>
+<published>2025-12-18T00:00:00Z</published>
+<updated>2025-12-18T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.1.* before 8.1.34, 8.2.* before 8.2.30, 8.3.* before 8.3.29, 8.4.* before 8.4.16, 8.5.* before 8.5.1 when using the PDO PostgreSQL driver with PDO::ATTR_EMULATE_PREPARES enabled, an invalid character sequence (such as \x99) in a prepared statement parameter may cause the quoting function PQescapeStringConn to return NULL, leading to a null pointer dereference in pdo_parse_params() function. This may lead to crashes (segmentation fault) and affect the availability of the… Fixed in: 8.1 8.1.34, 8.2 8.2.30, 8.3 8.3.29, 8.4 8.4.16, 8.5 8.5.1. CVSS: 8.2.</summary>
+</entry>
+<entry>
+<title>CVE-2025-14178 — In PHP versions:8.1.* before 8.1.34, 8.2.* before 8.2.30, 8.3.* before 8.3.29, 8.4.* before 8.4.16, 8.5.*…</title>
+<id>urn:phpatch:advisory:CVE-2025-14178</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-14178"/>
+<published>2025-12-18T00:00:00Z</published>
+<updated>2025-12-18T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions:8.1.* before 8.1.34, 8.2.* before 8.2.30, 8.3.* before 8.3.29, 8.4.* before 8.4.16, 8.5.* before 8.5.1, a heap buffer overflow occurs in array_merge() when the total element count of packed arrays exceeds 32-bit limits or HT_MAX_SIZE, due to an integer overflow in the precomputation of element counts using zend_hash_num_elements(). This may lead to memory corruption or crashes and affect the integrity and availability of the target server. Fixed in: 8.1 8.1.34, 8.2 8.2.30, 8.3 8.3.29, 8.4 8.4.16, 8.5 8.5.1. CVSS: 6.5.</summary>
+</entry>
+<entry>
+<title>CVE-2025-14177 — In PHP versions:8.1.* before 8.1.34, 8.2.* before 8.2.30, 8.3.* before 8.3.29, 8.4.* before 8.4.16, 8.5.*…</title>
+<id>urn:phpatch:advisory:CVE-2025-14177</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-14177"/>
+<published>2025-12-18T00:00:00Z</published>
+<updated>2025-12-18T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions:8.1.* before 8.1.34, 8.2.* before 8.2.30, 8.3.* before 8.3.29, 8.4.* before 8.4.16, 8.5.* before 8.5.1, the getimagesize() function may leak uninitialized heap memory into the APPn segments (e.g., APP1) when reading images in multi-chunk mode (such as via php://filter). This occurs due to a bug in php_read_stream_all_chunks() that overwrites the buffer without advancing the pointer, leaving tail bytes uninitialized. This may lead to information disclosure of sensitive heap… Fixed in: 8.1 8.1.34, 8.2 8.2.30, 8.3 8.3.29, 8.4 8.4.16, 8.5 8.5.1. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2025-6491 — In PHP versions:8.1.* before 8.1.33, 8.2.* before 8.2.29, 8.3.* before 8.3.23, 8.4.* before 8.4.10 when…</title>
+<id>urn:phpatch:advisory:CVE-2025-6491</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-6491"/>
+<published>2025-07-03T00:00:00Z</published>
+<updated>2025-07-03T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/>
+<summary>In PHP versions:8.1.* before 8.1.33, 8.2.* before 8.2.29, 8.3.* before 8.3.23, 8.4.* before 8.4.10 when parsing XML data in SOAP extensions, overly large (&gt;2Gb) XML namespace prefix may lead to null pointer dereference. This may lead to crashes and affect the availability of the target server. Fixed in: 8.1 8.1.33, 8.2 8.2.29, 8.3 8.3.23, 8.4 8.4.10. CVSS: 5.9.</summary>
+</entry>
+<entry>
+<title>CVE-2025-1735 — In PHP versions:8.1.* before 8.1.33, 8.2.* before 8.2.29, 8.3.* before 8.3.23, 8.4.* pgsql and pdo_pgsql…</title>
+<id>urn:phpatch:advisory:CVE-2025-1735</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-1735"/>
+<published>2025-07-03T00:00:00Z</published>
+<updated>2025-07-03T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/>
+<summary>In PHP versions:8.1.* before 8.1.33, 8.2.* before 8.2.29, 8.3.* before 8.3.23, 8.4.* pgsql and pdo_pgsql escaping functions do not check if the underlying quoting functions returned errors. This could cause crashes if Postgres server rejects the string as invalid. Fixed in: 8.1 8.1.33, 8.2 8.2.29, 8.3 8.3.23, 8.4 8.4.10. CVSS: 5.9.</summary>
+</entry>
+<entry>
+<title>CVE-2025-1220 — In PHP versions:8.1.* before 8.1.33, 8.2.* before 8.2.29, 8.3.* before 8.3.23, 8.4.* before 8.4.10 some…</title>
+<id>urn:phpatch:advisory:CVE-2025-1220</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-1220"/>
+<published>2025-07-03T00:00:00Z</published>
+<updated>2025-07-03T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/>
+<summary>In PHP versions:8.1.* before 8.1.33, 8.2.* before 8.2.29, 8.3.* before 8.3.23, 8.4.* before 8.4.10 some functions like fsockopen() lack validation that the hostname supplied does not contain null characters. This may lead to other functions like parse_url() treat the hostname in different way, thus opening way to security problems if the user code implements access checks before access using such functions. Fixed in: 8.1 8.1.33, 8.2 8.2.29, 8.3 8.3.23, 8.4 8.4.10. CVSS: 3.7.</summary>
+</entry>
+<entry>
+<title>CVE-2024-11235 — In PHP versions 8.3.* before 8.3.19 and 8.4.* before 8.4.5, a code sequence involving __set handler or ??=…</title>
+<id>urn:phpatch:advisory:CVE-2024-11235</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-11235"/>
+<published>2025-03-13T00:00:00Z</published>
+<updated>2025-03-13T00:00:00Z</updated>
+<category term="PHP 8.3"/><category term="PHP 8.4"/>
+<summary>In PHP versions 8.3.* before 8.3.19 and 8.4.* before 8.4.5, a code sequence involving __set handler or ??= operator and exceptions can lead to a use-after-free vulnerability. If the third party can control the memory layout leading to this, for example by supplying specially crafted inputs to the script, it could lead to remote code execution. Fixed in: 8.3 8.3.19, 8.4 8.4.5. CVSS: 9.2.</summary>
+</entry>
+<entry>
+<title>CVE-2025-1217 — In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before…</title>
+<id>urn:phpatch:advisory:CVE-2025-1217</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-1217"/>
+<published>2025-03-13T00:00:00Z</published>
+<updated>2025-03-13T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/>
+<summary>In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before 8.4.5, when http request module parses HTTP response obtained from a server, folded headers are parsed incorrectly, which may lead to misinterpreting the response and using incorrect headers, MIME types, etc. Fixed in: 8.1 8.1.32, 8.2 8.2.28, 8.3 8.3.19, 8.4 8.4.5. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2025-1219 — In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before…</title>
+<id>urn:phpatch:advisory:CVE-2025-1219</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-1219"/>
+<published>2025-03-13T00:00:00Z</published>
+<updated>2025-03-13T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/>
+<summary>In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before 8.4.5, when requesting a HTTP resource using the DOM or SimpleXML extensions, the wrong content-type header is used to determine the charset when the requested resource performs a redirect. This may cause the resulting document to be parsed incorrectly or bypass validations. Fixed in: 8.1 8.1.32, 8.2 8.2.28, 8.3 8.3.19, 8.4 8.4.5. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2025-1734 — In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before…</title>
+<id>urn:phpatch:advisory:CVE-2025-1734</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-1734"/>
+<published>2025-03-13T00:00:00Z</published>
+<updated>2025-03-13T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/>
+<summary>In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before 8.4.5, when receiving headers from HTTP server, the headers missing a colon (:) are treated as valid headers even though they are not. This may confuse applications into accepting invalid headers. Fixed in: 8.1 8.1.32, 8.2 8.2.28, 8.3 8.3.19, 8.4 8.4.5. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2025-1736 — In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before…</title>
+<id>urn:phpatch:advisory:CVE-2025-1736</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-1736"/>
+<published>2025-03-13T00:00:00Z</published>
+<updated>2025-03-13T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/>
+<summary>In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before 8.4.5, when user-supplied headers are sent, the insufficient validation of the end-of-line characters may prevent certain headers from being sent or lead to certain headers be misinterpreted. Fixed in: 8.1 8.1.32, 8.2 8.2.28, 8.3 8.3.19, 8.4 8.4.5. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2024-8932 — In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, uncontrolled long string…</title>
+<id>urn:phpatch:advisory:CVE-2024-8932</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-8932"/>
+<published>2024-11-21T00:00:00Z</published>
+<updated>2024-11-21T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, uncontrolled long string inputs to ldap_escape() function on 32-bit systems can cause an integer overflow, resulting in an out-of-bounds write. Fixed in: 8.1 8.1.31, 8.2 8.2.26, 8.3 8.3.14. CVSS: 9.8.</summary>
+</entry>
+<entry>
+<title>CVE-2024-11236 — In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, uncontrolled long string…</title>
+<id>urn:phpatch:advisory:CVE-2024-11236</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-11236"/>
+<published>2024-11-21T00:00:00Z</published>
+<updated>2024-11-21T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, uncontrolled long string inputs to ldap_escape() function on 32-bit systems can cause an integer overflow, resulting in an out-of-bounds write. Fixed in: 8.1 8.1.31, 8.2 8.2.26, 8.3 8.3.14. CVSS: 9.8.</summary>
+</entry>
+<entry>
+<title>CVE-2025-1861 — In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before…</title>
+<id>urn:phpatch:advisory:CVE-2025-1861</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2025-1861"/>
+<published>2024-11-21T00:00:00Z</published>
+<updated>2024-11-21T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/>
+<summary>In PHP from 8.1.* before 8.1.32, from 8.2.* before 8.2.28, from 8.3.* before 8.3.19, from 8.4.* before 8.4.5, when parsing HTTP redirect in the response to an HTTP request, there is currently limit on the location value size caused by limited size of the location buffer to 1024. However as per RFC9110, the limit is recommended to be 8000. This may lead to incorrect URL truncation and redirecting to a wrong location. Fixed in: 8.1 8.1.31, 8.2 8.2.26, 8.3 8.3.14, 8.4 8.4.5. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2024-8929 — In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, a hostile MySQL server can…</title>
+<id>urn:phpatch:advisory:CVE-2024-8929</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-8929"/>
+<published>2024-11-21T00:00:00Z</published>
+<updated>2024-11-21T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, a hostile MySQL server can cause the client to disclose the content of its heap containing data from other SQL requests and possible other data belonging to different users of the same server. Fixed in: 8.1 8.1.31, 8.2 8.2.26, 8.3 8.3.14. CVSS: 5.8.</summary>
+</entry>
+<entry>
+<title>CVE-2024-11234 — In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, when using streams with…</title>
+<id>urn:phpatch:advisory:CVE-2024-11234</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-11234"/>
+<published>2024-11-21T00:00:00Z</published>
+<updated>2024-11-21T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, when using streams with configured proxy and "request_fulluri" option, the URI is not properly sanitized which can lead to HTTP request smuggling and allow the attacker to use the proxy to perform arbitrary HTTP requests originating from the server, thus potentially gaining access to resources not normally available to the external user. Fixed in: 8.1 8.1.31, 8.2 8.2.26, 8.3 8.3.14. CVSS: 4.8.</summary>
+</entry>
+<entry>
+<title>CVE-2024-11233 — In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, due to an error in…</title>
+<id>urn:phpatch:advisory:CVE-2024-11233</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-11233"/>
+<published>2024-11-21T00:00:00Z</published>
+<updated>2024-11-21T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.31, 8.2.* before 8.2.26, 8.3.* before 8.3.14, due to an error in convert.quoted-printable-decode filter certain data can lead to buffer overread by one byte, which can in certain circumstances lead to crashes or disclose content of other memory areas. Fixed in: 8.1 8.1.31, 8.2 8.2.26, 8.3 8.3.14. CVSS: 4.8.</summary>
+</entry>
+<entry>
+<title>CVE-2024-8926 — In PHP versions 8.1.* before 8.1.30, 8.2.* before 8.2.24, 8.3.* before 8.3.12, when using a certain…</title>
+<id>urn:phpatch:advisory:CVE-2024-8926</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-8926"/>
+<published>2024-09-26T00:00:00Z</published>
+<updated>2024-09-26T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.30, 8.2.* before 8.2.24, 8.3.* before 8.3.12, when using a certain non-standard configurations of Windows codepages, the fixes for CVE-2024-4577 https://github.com/advisories/GHSA-vxpp-6299-mxw3 may still be bypassed and the same command injection related to Windows "Best Fit" codepage behavior can be achieved. This may allow a malicious user to pass options to PHP binary being run, and thus reveal the source code of scripts, run arbitrary PHP code on the… Fixed in: 8.1 8.1.30, 8.2 8.2.24, 8.3 8.3.12. CVSS: 8.1.</summary>
+</entry>
+<entry>
+<title>CVE-2024-8927 — In PHP versions 8.1.* before 8.1.30, 8.2.* before 8.2.24, 8.3.* before 8.3.12, HTTP_REDIRECT_STATUS…</title>
+<id>urn:phpatch:advisory:CVE-2024-8927</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-8927"/>
+<published>2024-09-26T00:00:00Z</published>
+<updated>2024-09-26T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.30, 8.2.* before 8.2.24, 8.3.* before 8.3.12, HTTP_REDIRECT_STATUS variable is used to check whether or not CGI binary is being run by the HTTP server. However, in certain scenarios, the content of this variable can be controlled by the request submitter via HTTP headers, which can lead to cgi.force_redirect option not being correctly applied. In certain configurations this may lead to arbitrary file inclusion in PHP. Fixed in: 8.1 8.1.30, 8.2 8.2.24, 8.3 8.3.12. CVSS: 7.5.</summary>
+</entry>
+<entry>
+<title>CVE-2024-9026 — In PHP versions 8.1.* before 8.1.30, 8.2.* before 8.2.24, 8.3.* before 8.3.12, when using PHP-FPM SAPI and…</title>
+<id>urn:phpatch:advisory:CVE-2024-9026</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-9026"/>
+<published>2024-09-26T00:00:00Z</published>
+<updated>2024-09-26T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.30, 8.2.* before 8.2.24, 8.3.* before 8.3.12, when using PHP-FPM SAPI and it is configured to catch workers output through catch_workers_output = yes, it may be possible to pollute the final log or remove up to 4 characters from the log messages by manipulating log message content. Additionally, if PHP-FPM is configured to use syslog output, it may be possible to further remove log data using the same vulnerability. Fixed in: 8.1 8.1.30, 8.2 8.2.24, 8.3 8.3.12. CVSS: 3.3.</summary>
+</entry>
+<entry>
+<title>CVE-2024-8925 — In PHP versions 8.1.* before 8.1.30, 8.2.* before 8.2.24, 8.3.* before 8.3.12, erroneous parsing of…</title>
+<id>urn:phpatch:advisory:CVE-2024-8925</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-8925"/>
+<published>2024-09-26T00:00:00Z</published>
+<updated>2024-09-26T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.30, 8.2.* before 8.2.24, 8.3.* before 8.3.12, erroneous parsing of multipart form data contained in an HTTP POST request could lead to legitimate data not being processed. This could lead to malicious attacker able to control part of the submitted data being able to exclude portion of other data, potentially leading to erroneous application behavior. Fixed in: 8.1 8.1.30, 8.2 8.2.24, 8.3 8.3.12. CVSS: 3.1.</summary>
+</entry>
+<entry>
+<title>CVE-2026-7258 — In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6,…</title>
+<id>urn:phpatch:advisory:CVE-2026-7258</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2026-7258"/>
+<published>2024-07-04T00:00:00Z</published>
+<updated>2024-07-04T00:00:00Z</updated>
+<category term="PHP 8.2"/><category term="PHP 8.3"/><category term="PHP 8.4"/><category term="PHP 8.5"/>
+<summary>In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, some functions, including urldecode(), pass signed char to ctype functions (like isxdigit()). On the systems with default signed char and optimized table-lookup ctype functions - such as NetBSD - this can lead to accessing array with negative offset, which can trigger a denial of service. Fixed in: 8.2 8.2.21, 8.3 8.3.31, 8.4 8.4.21, 8.5 8.5.6. CVSS: 6.3.</summary>
+</entry>
+<entry>
+<title>CVE-2024-4577 — In PHP versions 8.1.* before 8.1.29, 8.2.* before 8.2.20, 8.3.* before 8.3.8, when using Apache and…</title>
+<id>urn:phpatch:advisory:CVE-2024-4577</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-4577"/>
+<published>2024-06-06T00:00:00Z</published>
+<updated>2024-06-06T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.29, 8.2.* before 8.2.20, 8.3.* before 8.3.8, when using Apache and PHP-CGI on Windows, if the system is set up to use certain code pages, Windows may use "Best-Fit" behavior to replace characters in command line given to Win32 API functions. PHP CGI module may misinterpret those characters as PHP options, which may allow a malicious user to pass options to PHP binary being run, and thus reveal the source code of scripts, run arbitrary PHP code on the server, etc. Fixed in: 8.1 8.1.29, 8.2 8.2.20, 8.3 8.3.8. CVSS: 9.8.</summary>
+</entry>
+<entry>
+<title>CVE-2024-5585 — In PHP versions 8.1.* before 8.1.29, 8.2.* before 8.2.20, 8.3.* before 8.3.8, the fix for CVE-2024-1874…</title>
+<id>urn:phpatch:advisory:CVE-2024-5585</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-5585"/>
+<published>2024-06-06T00:00:00Z</published>
+<updated>2024-06-06T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>In PHP versions 8.1.* before 8.1.29, 8.2.* before 8.2.20, 8.3.* before 8.3.8, the fix for CVE-2024-1874 does not work if the command name includes trailing spaces. Original issue: when using proc_open() command with array syntax, due to insufficient escaping, if the arguments of the executed command are controlled by a malicious user, the user can supply arguments that would execute arbitrary commands in Windows shell. Fixed in: 8.1 8.1.29, 8.2 8.2.20, 8.3 8.3.8. CVSS: 7.7.</summary>
+</entry>
+<entry>
+<title>CVE-2024-2408 — The openssl_private_decrypt function in PHP, when using PKCS1 padding (OPENSSL_PKCS1_PADDING, which is the…</title>
+<id>urn:phpatch:advisory:CVE-2024-2408</id>
+<link href="https://nvd.nist.gov/vuln/detail/CVE-2024-2408"/>
+<published>2024-06-06T00:00:00Z</published>
+<updated>2024-06-06T00:00:00Z</updated>
+<category term="PHP 8.1"/><category term="PHP 8.2"/><category term="PHP 8.3"/>
+<summary>The openssl_private_decrypt function in PHP, when using PKCS1 padding (OPENSSL_PKCS1_PADDING, which is the default), is vulnerable to the Marvin Attack unless it is used with an OpenSSL version that includes the changes from this pull request: https://github.com/openssl/openssl/pull/13817 (rsa_pkcs1_implicit_rejection). These changes are part of OpenSSL 3.2 and have also been backported to stable versions of various Linux distributions, as well as to the PHP builds provided for Windows since… Fixed in: 8.1 8.1.29, 8.2 8.2.20, 8.3 8.3.8. CVSS: 5.9.</summary>
+</entry>
+</feed>
