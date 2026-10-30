@@ -1,0 +1,643 @@
+"""Dependency audit: `phpscan audit <composer.lock>`.
+
+Judges every package pinned in a composer.lock against published
+advisories from three sources, in priority order:
+
+  1. OSV (api.osv.dev, ecosystem "Packagist") — live queries, one
+     batch call for the whole lock; only package names and versions
+     are sent, never the lock file itself.
+  2. FriendsOfPHP/security-advisories — the canonical PHP advisory
+     database, vendored as data/friendsofphp.json (refresh path:
+     tools/refresh_advisories.py). Always consulted, so the audit
+     still works --offline and still works when OSV is unreachable.
+  3. CISA's Known Exploited Vulnerabilities catalog — a cross
+     reference only: a finding whose CVE is in KEV is flagged
+     `kev: true`. Vendored as data/kev.json.
+
+Version matching uses Composer semantics (constraint operators,
+wildcards, caret/tilde ranges, pre-release ordering) implemented
+below. Honesty rules, matching the rest of phpscan:
+
+  - a range this code cannot parse is reported under `unassessed`,
+    never guessed at;
+  - a lock version that is not a comparable release string (e.g.
+    `dev-master`) is reported under `unassessed`, never judged;
+  - "no findings" means "no advisory in these sources matches" —
+    the verdict detail says so, it is not a safety guarantee.
+
+Exit codes: 0 — no findings; 1 — at least one finding;
+2 — usage error or an input that cannot be audited at all
+(missing/unparseable lock file).
+"""
+
+import json
+import os
+import re
+import urllib.request
+
+from . import __version__
+
+_DATA = os.path.join(os.path.dirname(__file__), "data")
+_OSV_BATCH = "https://api.osv.dev/v1/querybatch"
+_OSV_VULN = "https://api.osv.dev/v1/vulns/"
+_UA = f"phpscan/{__version__} (+https://phpatch.com/security)"
+
+
+# ----------------------------------------------------------------
+# Composer version handling
+# ----------------------------------------------------------------
+
+_STABILITY = {"dev": 0, "alpha": 1, "a": 1, "beta": 2, "b": 2,
+              "rc": 3, "stable": 4, "patch": 5, "pl": 5, "p": 5}
+_VER_RE = re.compile(
+    r"^v?(\d+|[x*])(?:\.(\d+|[x*]))?(?:\.(\d+|[x*]))?"
+    r"(?:\.(\d+|[x*]))?"
+    r"(?:[-.]?(patch|alpha|beta|dev|rc|pl|a|b|p)"
+    r"(?:[-.]?(\d+))?)?$", re.I)
+
+
+class _Version:
+    __slots__ = ("key", "parts", "given", "wildcard")
+
+    def __init__(self, key, parts, wildcard):
+        self.key = key          # comparable tuple
+        self.parts = parts      # numeric components before any wildcard
+        self.given = len(parts)
+        self.wildcard = wildcard
+
+
+def parse_version(text):
+    """Parse a Composer version string -> _Version | None.
+
+    Handles release tags (v1.2.3, 1.2), pre-release suffixes
+    (1.0.0-RC1, 1.0.0pl1) and branch forms (1.2.x-dev, normalized
+    the way Composer normalizes them: the wildcard position is
+    padded with 9999999 and stability is dev). Returns None for
+    strings that are not comparable releases (`dev-master`,
+    `master`, commit hashes, ...).
+    """
+    if text is None:
+        return None
+    s = str(text).strip().lower().split("+")[0]
+    if not s or s.startswith("dev-") or s in ("master", "main"):
+        return None
+    m = _VER_RE.match(s)
+    if not m:
+        return None
+    raw = [g for g in m.groups()[:4] if g is not None]
+    stab_word = m.group(5)
+    stab_num = int(m.group(6) or 0)
+    rank = _STABILITY[stab_word.lower()] if stab_word else 4
+    wildcard = any(p in ("x", "*") for p in raw)
+    parts = []
+    for p in raw:
+        if p in ("x", "*"):
+            break
+        parts.append(int(p))
+    if rank == 0 and (wildcard or len(raw) < 3):
+        # Branch version (1.2.x-dev, 1.2-dev): Composer pads the
+        # open positions. An explicit 2.0.0-dev tag is NOT padded —
+        # it is the dev build of that exact release and sorts
+        # just below it.
+        nums = [9999999 if p in ("x", "*") else int(p) for p in raw]
+        nums += [9999999] * (4 - len(nums))
+    else:
+        full = [0 if p in ("x", "*") else int(p) for p in raw]
+        nums = full + [0] * (4 - len(full))
+    return _Version((tuple(nums), rank, stab_num), parts, wildcard)
+
+
+def _fmt_ver(nums):
+    n = list(nums)
+    while len(n) > 3 and n[-1] == 0:
+        n.pop()
+    while len(n) < 3:
+        n.append(0)
+    return ".".join(str(x) for x in n)
+
+
+class UnparseableConstraint(Exception):
+    pass
+
+
+_CMP_RE = re.compile(r"^(>=|<=|!=|==|>|<|=|\^|~)?(.*)$")
+
+
+def _bound(text):
+    v = parse_version(text)
+    if v is None:
+        raise UnparseableConstraint(f"bad version {text!r}")
+    return v
+
+
+def _wildcard_hi(parts):
+    """Exclusive upper bound for a partial/wildcard version:
+    increment the last given numeric component, zero the rest."""
+    nums = list(parts)
+    nums[-1] += 1
+    nums += [0] * (4 - len(nums))
+    return (tuple(nums), 4, 0)
+
+
+def _range_for_partial(v):
+    """[lo, hi) for a bare partial or wildcard version (1.2, 1.2.*)."""
+    lo = (tuple(v.parts + [0] * (4 - len(v.parts))), 4, 0)
+    return lo, _wildcard_hi(v.parts)
+
+
+def _caret_hi(v):
+    nums = list(v.parts) + [0] * (4 - len(v.parts))
+    for i, n in enumerate(nums):
+        if n != 0:
+            nums[i] = n + 1
+            for j in range(i + 1, 4):
+                nums[j] = 0
+            return (tuple(nums), 4, 0)
+    nums[max(v.given - 1, 0)] += 1  # ^0.0 -> <0.1 ; ^0 -> <1
+    return (tuple(nums), 4, 0)
+
+
+def _tilde_hi(v):
+    nums = list(v.parts) + [0] * (4 - len(v.parts))
+    idx = 1 if v.given >= 2 else 0  # ~1.2.3 -> <1.3 ; ~1.2 -> <1.3 ; ~1 -> <2
+    nums[idx] += 1
+    for j in range(idx + 1, 4):
+        nums[j] = 0
+    return (tuple(nums), 4, 0)
+
+
+def _eval_primitive(token, vkey):
+    m = _CMP_RE.match(token)
+    op, rest = m.group(1) or "", m.group(2)
+    if not rest:
+        raise UnparseableConstraint(f"missing version in {token!r}")
+    v = _bound(rest)
+    has_wild = v.wildcard
+    if has_wild and not v.parts:
+        if op in ("", "=", "=="):
+            return True  # "*" matches everything
+        if op == "!=":
+            return False
+        raise UnparseableConstraint(f"bare wildcard with {op!r}")
+    if op == "^":
+        lo = (tuple(v.parts + [0] * (4 - len(v.parts))),
+              v.key[1], v.key[2])
+        return lo <= vkey < _caret_hi(v)
+    if op == "~":
+        lo = (tuple(v.parts + [0] * (4 - len(v.parts))),
+              v.key[1], v.key[2])
+        return lo <= vkey < _tilde_hi(v)
+    if has_wild or (not op and v.given < 3):
+        if op in ("", "="):
+            lo, hi = _range_for_partial(v)
+            return lo <= vkey < hi
+        if op == "!=":
+            lo, hi = _range_for_partial(v)
+            return not (lo <= vkey < hi)
+        # Comparator against a wildcard: wildcards read as 0.
+        return _apply(op, vkey, v.key)
+    if not op:
+        return vkey == v.key
+    if op == "!=" and v.given < 3:
+        lo, hi = _range_for_partial(v)
+        return not (lo <= vkey < hi)
+    return _apply(op, vkey, v.key)
+
+
+def _apply(op, vkey, bound):
+    if op in ("=", "=="):
+        return vkey == bound
+    if op == "!=":
+        return vkey != bound
+    if op == ">":
+        return vkey > bound
+    if op == ">=":
+        return vkey >= bound
+    if op == "<":
+        return vkey < bound
+    if op == "<=":
+        return vkey <= bound
+    raise UnparseableConstraint(f"bad operator {op!r}")
+
+
+_HYPHEN_RE = re.compile(r"(\S+)\s+-\s+(\S+)")
+
+
+def _expand_hyphen(group):
+    def rep(m):
+        lo_s, hi_s = m.group(1), m.group(2)
+        hi = _bound(hi_s)
+        if hi.given >= 3:
+            return f">={lo_s},<={hi_s}"
+        nums = list(hi.parts)
+        nums[-1] += 1
+        hi_txt = _fmt_ver(nums + [0] * (4 - len(nums)))
+        return f">={lo_s},<{hi_txt}"
+    prev = None
+    while prev != group:
+        prev = group
+        group = _HYPHEN_RE.sub(rep, group, count=1)
+    return group
+
+
+def constraint_matches(constraint, vkey):
+    """True/False for one Composer constraint expression against a
+    parsed version key. Raises UnparseableConstraint on anything
+    outside the grammar (comparators, wildcards, ^, ~, hyphen
+    ranges, ||-unions, comma/space conjunctions)."""
+    if constraint is None or str(constraint).strip() == "":
+        raise UnparseableConstraint("empty constraint")
+    text = _expand_hyphen(str(constraint))
+    for group in re.split(r"\|\|?", text):
+        group = group.strip()
+        if not group:
+            continue
+        tokens = [t for t in re.split(r"[\s,]+", group) if t]
+        ops = (">=", "<=", "!=", "==", ">", "<", "=", "^", "~")
+        merged = []
+        for t in tokens:  # an operator may stand alone: ">= 1.2"
+            if merged and merged[-1] in ops:
+                merged[-1] += t
+            else:
+                merged.append(t)
+        if all(_eval_primitive(t, vkey) for t in merged):
+            return True
+    return False
+
+
+def versions_match(versions, vkey):
+    """A FriendsOfPHP branch entry: a list of constraint strings
+    that are ANDed together (','-joined forms included)."""
+    return constraint_matches(",".join(str(v) for v in versions),
+                              vkey)
+
+
+def branch_in_scope(branch, version):
+    """Whether a FriendsOfPHP branch entry applies to a version.
+
+    A numeric branch key ("7.12", "6.x", "8.5.x") scopes its
+    constraint list to that release line: an unbounded "<7.12.1"
+    listed under branch "7.12" says nothing about 6.5.5, and
+    matching it anyway would print a verdict the evidence does
+    not support. Non-numeric keys ("master", "dev-master", ...)
+    carry no line scoping — their constraint lists bound
+    themselves (e.g. "'>=7', '<7.4.4'"). Keys in any other shape
+    are likewise left to their constraints.
+    """
+    if branch is None:
+        return True
+    key = str(branch).strip().lower()
+    if key.endswith("-dev"):
+        key = key[:-4]
+    if key.startswith("v"):
+        key = key[1:]
+    comps = key.split(".")
+    nums = []
+    for c in comps:
+        if c in ("x", "*"):
+            nums.append(None)
+        elif c.isdigit():
+            nums.append(int(c))
+        else:
+            return True  # not a line key: constraints decide
+    vnums = version.key[0]
+    return all(want is None or vnums[i] == want
+               for i, want in enumerate(nums))
+
+
+def _derive_fixed(versions):
+    """Best fixed-version claim from a matched constraint list:
+    the smallest strict `<X` bound, else None (never guessed)."""
+    best = None
+    for text in versions:
+        for token in re.split(r"[\s,]+", str(text)):
+            m = re.match(r"^<(\d+(?:\.\d+){0,3})$", token)
+            if m:
+                v = parse_version(m.group(1))
+                if v and (best is None or v.key < best[0]):
+                    best = (v.key, _fmt_ver(v.key[0]))
+    return best[1] if best else None
+
+
+# ----------------------------------------------------------------
+# Vendored data
+# ----------------------------------------------------------------
+
+def load_friendsofphp(path=None):
+    with open(path or os.path.join(_DATA, "friendsofphp.json"),
+              encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_kev(path=None):
+    with open(path or os.path.join(_DATA, "kev.json"),
+              encoding="utf-8") as f:
+        d = json.load(f)
+    return d, set(d["cves"])
+
+
+# ----------------------------------------------------------------
+# OSV client (live mode only)
+# ----------------------------------------------------------------
+
+def _osv_request(url, payload=None, timeout=20):
+    data = None
+    headers = {"User-Agent": _UA}
+    if payload is not None:
+        data = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
+def osv_querybatch(packages, timeout=20):
+    """packages: list of (name, version-string). Returns the
+    aligned results list from OSV querybatch."""
+    queries = [{"package": {"name": n, "ecosystem": "Packagist"},
+                "version": v} for n, v in packages]
+    out = []
+    for i in range(0, len(queries), 1000):
+        resp = _osv_request(_OSV_BATCH,
+                            {"queries": queries[i:i + 1000]}, timeout)
+        out.extend(resp.get("results") or [])
+    return out
+
+
+def osv_get_vuln(vuln_id, timeout=20):
+    return _osv_request(_OSV_VULN + vuln_id, timeout=timeout)
+
+
+def _osv_fixed(vuln, name, installed_key):
+    best = None
+    for aff in vuln.get("affected") or []:
+        pkg = aff.get("package") or {}
+        if (pkg.get("name") or "").lower() != name:
+            continue
+        for rng in aff.get("ranges") or []:
+            for ev in rng.get("events") or []:
+                if "fixed" in ev:
+                    v = parse_version(ev["fixed"])
+                    if v and v.key > installed_key and (
+                            best is None or v.key < best[0]):
+                        best = (v.key, _fmt_ver(v.key[0]))
+    return best[1] if best else None
+
+
+def _osv_severity(vuln):
+    sev = (vuln.get("database_specific") or {}).get("severity")
+    if sev:
+        return sev
+    for s in vuln.get("severity") or []:
+        if s.get("score"):
+            return s["score"]
+    return None
+
+
+def _osv_link(vuln):
+    for ref in vuln.get("references") or []:
+        if ref.get("type") in ("ADVISORY", "WEB") and ref.get("url"):
+            return ref["url"]
+    return None
+
+
+# ----------------------------------------------------------------
+# Audit
+# ----------------------------------------------------------------
+
+def _remediation(pkg, primary_id, fixed):
+    if fixed:
+        return (f"Run `composer update {pkg}` to upgrade {pkg} to "
+                f"{fixed} or later, which fixes {primary_id}.")
+    return (f"No fixed release is published for {primary_id}. Run "
+            f"`composer update {pkg}` to confirm the newest release "
+            f"is installed, and consider replacing or removing "
+            f"{pkg} until a fix is available.")
+
+
+def _finding(pkg, version, dev, fid, cve, title, severity, fixed,
+             link, sources, aliases=()):
+    f = {"package": pkg, "version": version, "dev": dev, "id": fid,
+         "cve": cve, "aliases": list(aliases), "title": title,
+         "severity": severity, "kev": False, "fixed": fixed,
+         "link": link, "sources": list(sources)}
+    f["remediation"] = _remediation(pkg, fid, fixed)
+    return f
+
+
+def parse_lock(lock):
+    """composer.lock dict -> list of {name, version, dev}."""
+    out = []
+    for key, dev in (("packages", False), ("packages-dev", True)):
+        entries = lock.get(key) or []
+        if not isinstance(entries, list):
+            raise ValueError(f"composer.lock: {key} is not a list")
+        for e in entries:
+            if isinstance(e, dict) and e.get("name") \
+                    and e.get("version"):
+                out.append({"name": str(e["name"]).lower(),
+                            "version": str(e["version"]), "dev": dev})
+    return out
+
+
+def run_audit(lock_path, offline=False, osv_batch=None, osv_vuln=None,
+              fop=None, kev=None):
+    """Returns (report_dict, exit_code). The osv_*/fop/kev
+    parameters are dependency-injection seams for tests."""
+    with open(lock_path, encoding="utf-8") as fh:
+        lock = json.load(fh)
+    if not isinstance(lock, dict) or "packages" not in lock:
+        raise ValueError("not a composer.lock (no 'packages' key)")
+    pkgs = parse_lock(lock)
+
+    if fop is None:
+        fop = load_friendsofphp()
+    kev_meta, kev_set = (kev if kev is not None else load_kev())
+    fop_pkgs = fop.get("packages") or {}
+
+    findings = {}
+    unassessed = []
+
+    def add(f):
+        key = (f["package"], f["cve"] or f["id"])
+        old = findings.get(key)
+        if old is None:
+            findings[key] = f
+            return
+        for s in f["sources"]:
+            if s not in old["sources"]:
+                old["sources"].append(s)
+        for a in f["aliases"]:
+            if a not in old["aliases"] and a != old["id"]:
+                old["aliases"].append(a)
+        if old["severity"] is None:
+            old["severity"] = f["severity"]
+        if old["fixed"] is None:
+            old["fixed"] = f["fixed"]
+        if old["link"] is None:
+            old["link"] = f["link"]
+        old["remediation"] = _remediation(old["package"], old["id"],
+                                          old["fixed"])
+
+    parseable = []
+    for p in pkgs:
+        v = parse_version(p["version"])
+        if v is None:
+            unassessed.append({
+                "package": p["name"], "version": p["version"],
+                "dev": p["dev"], "advisory": None,
+                "reason": "version string is not a release version "
+                          "this tool can compare (branch/dev build); "
+                          "no verdict is claimed for this package"})
+            continue
+        p["_v"] = v
+        parseable.append(p)
+
+        # --- FriendsOfPHP (vendored, canonical) ---
+        for adv in fop_pkgs.get(p["name"]) or []:
+            matched, bad, fixed = False, None, None
+            for rng in adv.get("ranges") or []:
+                if not branch_in_scope(rng.get("branch"), v):
+                    continue
+                try:
+                    if versions_match(rng["versions"], v.key):
+                        matched = True
+                        fixed = _derive_fixed(rng["versions"])
+                        break
+                except UnparseableConstraint as e:
+                    bad = (rng["versions"], e)
+            if matched:
+                add(_finding(p["name"], p["version"], p["dev"],
+                             adv["id"], adv.get("cve"),
+                             adv.get("title") or adv["id"], None,
+                             fixed, adv.get("link"),
+                             ["friendsofphp"]))
+            elif bad is not None:
+                unassessed.append({
+                    "package": p["name"], "version": p["version"],
+                    "dev": p["dev"], "advisory": adv["id"],
+                    "reason": f"affected range {bad[0]!r} could not "
+                              f"be parsed ({bad[1]}); no verdict is "
+                              f"claimed for this advisory"})
+
+    # --- OSV (live, priority source) ---
+    osv_status = {"status": "offline"} if offline else \
+        {"status": "live"}
+    if not offline and parseable:
+        batch = osv_batch or osv_querybatch
+        getv = osv_vuln or osv_get_vuln
+        try:
+            results = batch([(p["name"], p["version"])
+                             for p in parseable])
+            details = {}
+            for p, res in zip(parseable, results):
+                for stub in (res or {}).get("vulns") or []:
+                    vid = stub.get("id")
+                    if not vid:
+                        continue
+                    if vid not in details:
+                        details[vid] = getv(vid)
+                    vuln = details[vid]
+                    if vuln.get("withdrawn"):
+                        continue
+                    aliases = vuln.get("aliases") or []
+                    cve = next((a for a in aliases
+                                if a.startswith("CVE-")),
+                               vid if vid.startswith("CVE-") else None)
+                    title = vuln.get("summary") or \
+                        (vuln.get("details") or "").split("\n")[0] or vid
+                    add(_finding(p["name"], p["version"], p["dev"],
+                                 vid, cve, title,
+                                 _osv_severity(vuln),
+                                 _osv_fixed(vuln, p["name"], p["_v"].key),
+                                 _osv_link(vuln), ["osv"],
+                                 aliases=aliases))
+        except Exception as e:  # degraded, disclosed — never silent
+            osv_status = {"status": "error",
+                          "detail": f"OSV lookup failed ({e}); "
+                                    f"results below rest on the "
+                                    f"vendored FriendsOfPHP snapshot "
+                                    f"only"}
+
+    # --- CISA KEV cross-reference ---
+    for f in findings.values():
+        if f["cve"] and f["cve"] in kev_set:
+            f["kev"] = True
+
+    flist = sorted(findings.values(),
+                   key=lambda f: (f["package"], f["id"]))
+    n_dev = sum(1 for p in pkgs if p["dev"])
+    if flist:
+        verdict = {"status": "vulnerable", "findings": len(flist),
+                   "detail": f"{len(flist)} known advisor"
+                             f"{'y' if len(flist) == 1 else 'ies'} "
+                             f"affect {len({f['package'] for f in flist})} "
+                             f"locked package(s)."}
+    else:
+        verdict = {"status": "no_findings", "findings": 0,
+                   "detail": "No advisory in OSV or the vendored "
+                             "FriendsOfPHP snapshot matches the "
+                             "locked versions. That covers only the "
+                             "advisories in those sources — it is "
+                             "not a general security guarantee."}
+    if unassessed:
+        verdict["detail"] += (f" {len(unassessed)} package/advisory "
+                              f"pair(s) could not be assessed and "
+                              f"are listed under 'unassessed' — no "
+                              f"verdict is claimed for them.")
+    report = {
+        "target": lock_path,
+        "mode": "audit",
+        "packages_scanned": len(pkgs) - n_dev,
+        "dev_packages_scanned": n_dev,
+        "sources": {
+            "osv": osv_status,
+            "friendsofphp": {
+                "snapshot_date": fop.get("snapshot_date"),
+                "commit": fop.get("commit")},
+            "kev": {"snapshot_date": kev_meta.get("snapshot_date"),
+                    "catalog_version": kev_meta.get("catalog_version")},
+        },
+        "findings": flist,
+        "unassessed": unassessed,
+        "verdict": verdict,
+    }
+    return report, 1 if flist else 0
+
+
+USAGE = ("usage: phpscan audit <composer.lock|directory> [--offline]"
+         "\n\nAudit the packages pinned in a composer.lock against "
+         "OSV,\nthe vendored FriendsOfPHP advisory snapshot, and the "
+         "CISA KEV\ncatalog. Prints one JSON report. Exit codes: 0 = "
+         "no findings,\n1 = findings, 2 = usage/input error.")
+
+
+def audit_main(argv):
+    offline = False
+    positional = []
+    for a in argv:
+        if a == "--offline":
+            offline = True
+        elif a.startswith("--"):
+            print(USAGE)
+            return 2
+        else:
+            positional.append(a)
+    if len(positional) != 1:
+        print(USAGE)
+        return 2
+    target = positional[0]
+    if os.path.isdir(target):
+        target = os.path.join(target, "composer.lock")
+    if not os.path.isfile(target):
+        print(json.dumps({"target": target, "mode": "audit",
+                          "error": "composer.lock not found"}))
+        return 2
+    try:
+        report, code = run_audit(target, offline=offline)
+    except (OSError, ValueError) as e:
+        print(json.dumps({"target": target, "mode": "audit",
+                          "error": f"cannot audit this file: {e}"}))
+        return 2
+    print(json.dumps(report, indent=1))
+    return code

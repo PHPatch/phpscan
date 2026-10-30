@@ -173,6 +173,39 @@ error, or a target could not be judged at all: unreachable, or
 database, so the scanner cannot judge it). With several targets,
 the worst code wins.
 
+### Audit a composer.lock
+
+Your PHP version is only half the surface — the other half is
+what Composer installed. `phpscan audit` checks a project's
+`composer.lock` against published advisories:
+
+```bash
+python3 -m phpscan audit path/to/composer.lock
+python3 -m phpscan audit path/to/project/        # dir with a lock
+python3 -m phpscan audit composer.lock --offline # vendored data only
+```
+
+Each locked package is matched against three sources: the
+[OSV](https://osv.dev) API for the Packagist ecosystem (queried
+live; only package names and versions are sent, batched), a
+vendored snapshot of the
+[FriendsOfPHP security-advisories](https://github.com/FriendsOfPHP/security-advisories)
+database — the canonical PHP advisory source, with branch-scoped
+Composer version matching, so an advisory listed for the 7.12
+line never fires on 6.5.5 — and the
+[CISA KEV catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog),
+which flags findings that are known to be exploited in the wild.
+Dev dependencies are included and flagged `"dev": true`.
+
+Every finding carries a `remediation` — the exact
+`composer update <package>` command and the fixed version it
+reaches. An advisory whose published range can't be parsed, or a
+locked version that isn't a release version, is reported under
+`unassessed` instead of being guessed at. Exit codes: **0** — no
+findings; **1** — findings; **2** — missing or unparseable lock.
+The vendored snapshots are refreshed with
+`tools/refresh_advisories.py` (see its docstring).
+
 Prefer a browser? The same scan runs free at
 [phpatch.com](https://phpatch.com) and includes a PDF report.
 
