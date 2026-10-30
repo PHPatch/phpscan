@@ -20,9 +20,13 @@ _UNJUDGED = ("not_assessed", "unreachable")
 
 
 def main(argv):
+    argv = [a for a in argv if a != ""]
     if not argv:
         print(__doc__)
         return 2
+    if any(a in ("-h", "--help") for a in argv):
+        print(__doc__)
+        return 0
     worst = 0
     for url in argv:
         try:
@@ -37,6 +41,11 @@ def main(argv):
             print(json.dumps({"url": url, "error": str(e)}))
             worst = max(worst, 2)
     return worst
+
+
+def cli():
+    """Console-script entry point (the `phpscan` command)."""
+    return main(sys.argv[1:])
 
 
 if __name__ == "__main__":
