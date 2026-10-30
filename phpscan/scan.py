@@ -19,7 +19,7 @@ import threading
 import time
 import urllib.parse
 
-from . import versioning
+from . import detect, hygiene, versioning
 
 _UA = "phpscan/1.4.4 (+https://phpatch.com/security)"
 _TIMEOUT = 12
@@ -365,7 +365,9 @@ def scan(url):
               "http_status": home["status"], "final_url": home["final_url"],
               "error": home.get("error"), "signals": {},
               "php_version": None, "version_source": None,
-              "cms": [], "phpinfo_exposed": False, "verdict": None,
+              "cms": [], "cms_info": [], "plugins": [],
+              "findings": [], "phpinfo_exposed": False,
+              "verdict": None,
               "compromise_indicators": []}
     if not home["ok"] and home["status"] is None:
         result["verdict"] = {"status": "unreachable",
@@ -445,6 +447,31 @@ def scan(url):
     result["compromise_indicators"] = _hunt.remote_indicators(
         _fetch, base, deadline=end)
 
+    # CMS/plugin detection + config hygiene (detect.py /
+    # hygiene.py): the extra read-only probes (REST index,
+    # readme files, /.git/HEAD, /.env, directory indexes) draw
+    # from the same shared scan deadline as everything else.
+    def _probe(u):
+        return _fetch(u, deadline=end)
+
+    cms_info, plugin_list, findings = detect.analyze(
+        headers, body, _probe, base, pre_cms=result["cms"])
+    for info in cms_info:
+        if info["name"] not in result["cms"]:
+            result["cms"].append(info["name"])
+    result["cms_info"] = cms_info
+    result["plugins"] = plugin_list
+    findings += hygiene.header_findings(headers, _fp.scheme)
+    findings += hygiene.exposure_probes(_probe, base,
+                                         result["cms"])
+    if result["phpinfo_exposed"]:
+        findings.append(hygiene.phpinfo_finding(
+            result["signals"].get("phpinfo_path",
+                                  "/phpinfo.php")))
+    findings.sort(key=lambda f: detect.SEVERITY_RANK[
+        f["severity"]])
+    result["findings"] = findings
+
     vtuple = versioning.parse_version(result["php_version"])
     if vtuple:
         result["verdict"] = versioning.verdict_for(
@@ -464,6 +491,8 @@ def scan(url):
             "status": "no_php_detected",
             "detail": "No PHP signals found. The site may not run PHP, or "
                       "may hide every fingerprint."}
+    result["verdict"] = detect.apply_findings(
+        result["verdict"], result["findings"])
     return result
 
 
@@ -482,6 +511,10 @@ def render_text(r):
         lines.append(f"!! Possible compromise indicator: {ind['path']} "
                      "answers in public. Indicative only — confirm "
                      "with `phpscan hunt` on the server.")
+    for f in r.get("findings") or []:
+        lines.append(f"FINDING [{f['severity'].upper()}]: "
+                     f"{f['title']}")
+        lines.append(f"             Fix: {f['remediation']}")
     v = r["verdict"]
     lines.append(f"VERDICT:     {v['status'].upper()}")
     lines.append(f"             {v['detail']}")

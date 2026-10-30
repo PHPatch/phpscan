@@ -20,6 +20,28 @@ the git log.
   the full walkthrough at
   https://phpatch.com/guides/version-hidden. Additive only —
   no verdict label or other verdict's text changed.
+- External scan: CMS detection, plugin vulnerability matching
+  and config-hygiene checks (`phpscan/detect.py`,
+  `phpscan/hygiene.py`). WordPress, Drupal, Joomla, Magento and
+  Laravel are fingerprinted from public disclosures only
+  (generator tags, asset paths, headers, `/wp-json/`, read-only
+  version files); a version is reported only when the site
+  discloses it. WordPress plugin/theme versions are matched
+  against a vendored dataset of the most-exploited plugin
+  vulnerabilities (`phpscan/data/wp_plugins.json` — 26
+  plugins/themes, 28 CVEs with affected ranges, fixed versions,
+  CVSS and CISA KEV flags — built from NVD CPE ranges with
+  CVE.org CNA ranges as gap-fillers, cross-checked against the
+  KEV catalog; regenerate with `tools/refresh_wp_plugins.py`).
+  Hygiene checks cover exposed phpinfo, `X-Powered-By`
+  disclosure, missing security headers, publicly served
+  `.git/HEAD` / `.env` (exposure confirmed from first bytes
+  only; contents never enter the report) and directory listings
+  on upload/plugin directories. All findings carry a remediation
+  and land in the result's `findings` list, severity-ordered
+  with KEV-listed plugin vulnerabilities first; a critical/high
+  finding escalates the verdict to `vulnerable` (the escalated
+  verdict carries the findings).
 
 ## 1.5.0 — 2026-10-30
 

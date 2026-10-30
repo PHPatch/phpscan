@@ -34,6 +34,12 @@ It is the open-source scanner behind [phpatch.com](https://phpatch.com).
   so it cannot be pointed at internal services. The refusals are
   exercised by the test suite in `tests/` on every push.
 - **Zero dependencies.** Python 3.11+ standard library only.
+- **CMS, plugin and config-hygiene checks.** The same scan also
+  fingerprints the CMS (WordPress, Drupal, Joomla, Magento,
+  Laravel), matches publicly disclosed plugin/theme versions
+  against known-vulnerable ranges, and reports configuration
+  exposures (`.git`, `.env`, directory listings, missing security
+  headers) — every finding with a remediation. See below.
 
 ## Verdicts
 
@@ -276,6 +282,46 @@ report, and monitoring are what the hosted service adds:
   — how a bilingual news portal patched php2shell on disclosure
   night: 8.3.35 to 8.3.36 under mod_php, about 10 seconds of
   downtime, verified live, no compromise found.
+
+## CMS, plugin and hygiene checks
+
+Beyond the PHP version itself, every scan reports:
+
+- **CMS detection** — WordPress, Drupal, Joomla, Magento and
+  Laravel, fingerprinted from what the site itself discloses:
+  generator tags, distinctive asset paths, response headers
+  (Drupal's `X-Generator`, Magento's `X-Magento-*`), REST entry
+  points (`/wp-json/`), and read-only version files
+  (`CHANGELOG.txt`, the Joomla manifest). A version is reported
+  only when the site discloses it; otherwise the result says
+  "detected, version hidden" — versions are never guessed.
+- **WordPress plugin/theme vulnerabilities** — versions disclosed
+  in enqueued asset URLs, `readme.txt` stable tags, theme
+  `style.css` headers and `/wp-json/` namespaces are matched
+  against `phpscan/data/wp_plugins.json`: a vendored dataset of
+  the most-exploited WordPress plugin vulnerabilities (affected
+  ranges, fixed version, CVE, CVSS, CISA KEV flag), built from
+  the NVD's CPE/description data cross-checked against the CISA
+  KEV catalog. Refresh it with `tools/refresh_wp_plugins.py`.
+  Known end-of-life CMS lines (Drupal 7/8/9, Joomla 3) are
+  flagged as well.
+- **Config hygiene** — an exposed phpinfo page, `X-Powered-By`
+  version disclosure, missing security headers
+  (`X-Content-Type-Options`, `X-Frame-Options` /
+  `frame-ancestors`, `Referrer-Policy`, HSTS on HTTPS), a
+  publicly served `.git/HEAD` or `.env` file, and directory
+  listings on common upload/plugin directories. The `.env` /
+  `.git` checks confirm exposure from the response's first bytes
+  only — file contents are never copied into the report, only
+  "exposed" plus the path.
+
+Findings land in the scan result's `findings` list, ordered
+by severity — KEV-listed plugin vulnerabilities first — and
+every finding carries a `remediation`. A critical or high
+finding escalates the verdict to `vulnerable` (the escalated
+verdict carries the findings) even when the PHP version
+itself is current; otherwise the PHP verdict passes through
+unchanged.
 
 ## Authorized use
 
