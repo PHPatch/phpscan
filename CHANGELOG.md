@@ -1,10 +1,12 @@
 # Changelog
 
-The package version in `pyproject.toml` is 1.6.0. Signed GitHub
+The package version in `pyproject.toml` is 1.7.0. Signed GitHub
 Releases start with 1.4.4; earlier history below is taken from
 the git log.
 
 ## Unreleased
+
+## 1.7.0 — 2026-10-30
 
 - External scan: exposed-`composer.lock` audit. When a scan
   finds the site's `composer.lock` publicly served, it fetches
