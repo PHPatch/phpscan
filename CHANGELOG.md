@@ -1,9 +1,10 @@
 # Changelog
 
-No version tags yet — history below is taken from the git log.
-The package version in `pyproject.toml` is 1.4.4.
+The package version in `pyproject.toml` is 1.4.4. Signed GitHub
+Releases start with 1.4.4; earlier history below is taken from
+the git log.
 
-## Unreleased
+## 1.4.4 — 2026-10-30
 
 - Actionable verdicts (`vulnerable`, `possibly_vulnerable`, `eol`)
   now carry a `remediation` field naming the upgrade that fixes
@@ -12,6 +13,13 @@ The package version in `pyproject.toml` is 1.4.4.
 - README: `pip install git+https://github.com/PHPatch/phpscan.git`
   install path (verified by a clean-room venv install), and a
   "Scanned by phpscan" badge snippet.
+- Installable console script: installing the package now provides
+  a `phpscan` command; `-h` / `--help` print the usage text.
+- Signed releases: artifacts are PGP-signed with the PHPatch
+  Security key (see `SECURITY.md`), ship with an SBOM, and are
+  built for PyPI trusted publishing (OIDC).
+- Dockerfile + GHCR image workflow, and a companion GitHub Action
+  (`PHPatch/phpscan-action`).
 
 ## History
 
