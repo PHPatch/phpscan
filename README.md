@@ -130,13 +130,30 @@ the php.net release announcements on every PHP security release
 One line, from PyPI (Python 3.11+, standard library only — zero dependencies):
 
 ```bash
-pipx install phpscan
+pip install phpscan
 phpscan https://your-site.com
 ```
 
-Also available as a Docker image (`docker run ghcr.io/phpatch/phpscan https://your-site.com`),
-a GitHub Action (`PHPatch/phpscan-action@v1`), directly from GitHub
-(`pip install git+https://github.com/PHPatch/phpscan.git`), or by cloning this repo.
+On systems that refuse with "externally-managed-environment" (Debian/Ubuntu
+and Homebrew Pythons), use pipx or Docker instead — both are below.
+
+For a CLI tool, pipx is the recommended route — it keeps phpscan's
+dependencies isolated from your system Python:
+
+```bash
+python3 -m pip install --user pipx   # if you don't have pipx yet
+pipx install phpscan
+```
+
+Docker:
+
+```bash
+docker run ghcr.io/phpatch/phpscan https://your-site.com
+```
+
+Also available as a GitHub Action (`PHPatch/phpscan-action@v1`), directly
+from GitHub (`pip install git+https://github.com/PHPatch/phpscan.git`), or by
+cloning this repo.
 
 ## Run it
 
