@@ -1,0 +1,33 @@
+name: publish
+
+# Publish to PyPI via trusted publishing (OIDC) when a GitHub
+# Release is published. No PyPI password or API token is stored in
+# this repo: PyPI verifies the workflow identity directly. Until
+# the matching trusted publisher is configured on PyPI (project
+# "phpscan", owner PHPatch, repo phpscan, workflow publish.yml),
+# the publish step fails harmlessly and the release stands alone.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # required for PyPI trusted publishing (OIDC)
+    steps:
+      # Actions pinned to commit SHAs (supply-chain hygiene);
+      # the trailing comments name the release each SHA is.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - run: python -m build
+      # Per PyPI's own docs this action is referenced by its
+      # release/v1 branch rather than a pinned SHA.
+      - uses: pypa/gh-action-pypi-publish@release/v1
