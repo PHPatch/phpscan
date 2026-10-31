@@ -208,7 +208,8 @@ def _kill_conn(conn):
         pass
 
 
-def _read_capped(resp, budget=None, sock=None, max_body=None):
+def _read_capped(resp, budget=None, sock=None, max_body=None,
+                 abort_check=None):
     """Read a response body up to `max_body` bytes (default
     _MAX_BODY) under a TOTAL deadline, so a slow-drip server
     cannot hold the scanner open one byte at a time under the
@@ -218,7 +219,13 @@ def _read_capped(resp, budget=None, sock=None, max_body=None):
     fetch's total deadline) can only shorten the read, never
     extend it past _DEADLINE. When `sock` is given, its timeout
     is recomputed from the remaining budget before every chunk
-    read, so no single read can wait past the deadline either."""
+    read, so no single read can wait past the deadline either.
+    `abort_check(prefix)` is consulted after each chunk with
+    up to the first 4096 bytes read so far: a true result stops
+    the read early (the caller has already seen enough to judge
+    the body — e.g. an exposed-lockfile probe whose response is
+    obviously an HTML page); None means "no evidence yet, keep
+    reading"."""
     cap = _MAX_BODY if max_body is None else max_body
     chunks, got = [], 0
     secs = _DEADLINE if budget is None else min(_DEADLINE, budget)
@@ -244,6 +251,9 @@ def _read_capped(resp, budget=None, sock=None, max_body=None):
             break
         chunks.append(chunk)
         got += len(chunk)
+        if abort_check is not None \
+                and abort_check(b"".join(chunks)[:4096]):
+            break
     return b"".join(chunks)[:cap]
 
 
@@ -257,7 +267,8 @@ def _headers_dict(resp):
     return out
 
 
-def _fetch(url, ctx=None, deadline=None, max_body=None):
+def _fetch(url, ctx=None, deadline=None, max_body=None,
+           early_abort=None):
     """Guarded fetch: http/https only, ports 80/443 only, no URL
     credentials, every redirect hop re-validated and IP-pinned,
     body capped, and a TOTAL deadline across connect + headers +
@@ -270,8 +281,10 @@ def _fetch(url, ctx=None, deadline=None, max_body=None):
     per-read socket timeouts alone cannot stop a drip, because
     each byte that arrives inside the timeout re-arms the wait.
     When a host resolves to several public IPs, each is tried in
-    turn on connection-level failures. Returns the same dict
-    shape as before."""
+    turn on connection-level failures. `early_abort(headers,
+    prefix)` may cut the body read short once the response is
+    judgeable (see _read_capped). Returns the same dict shape
+    as before."""
     current = url
     end = deadline if deadline is not None else \
         time.monotonic() + _TOTAL_DEADLINE
@@ -331,9 +344,14 @@ def _fetch(url, ctx=None, deadline=None, max_body=None):
                     current = urllib.parse.urljoin(current, location)
                     redirected = True
                     break
+                abort_check = None
+                if early_abort is not None:
+                    abort_check = lambda prefix: early_abort(
+                        headers, prefix)
                 raw = _read_capped(resp, end - time.monotonic(),
                                    sock=getattr(conn, "sock", None),
-                                   max_body=max_body)
+                                   max_body=max_body,
+                                   abort_check=abort_check)
                 body = raw.decode("utf-8", "replace")
                 return {"ok": status < 400, "status": status,
                         "final_url": current, "headers": headers,
@@ -546,6 +564,25 @@ def _audit_exposed(fetch, url, path, prov_type, kind, noun,
     return lock_info, out
 
 
+def _lock_early_abort(headers, prefix):
+    """Early-abort predicate for the exposed-lockfile probe.
+    A composer.lock is a JSON document: if the response's
+    Content-Type says HTML, or its first non-whitespace byte is
+    not '{', the body is not a lockfile and the remaining bytes
+    (up to the 8 MB cap) are worthless — stop reading. Returns
+    True to abort, False to keep reading, None while the prefix
+    is all whitespace (no evidence yet)."""
+    ctype = ""
+    if headers:
+        ctype = (headers.get("content-type") or "").lower()
+    if "text/html" in ctype:
+        return True
+    stripped = prefix.lstrip()
+    if not stripped:
+        return None
+    return stripped[:1] != b"{"
+
+
 def _exposed_lock(fetch, base, offline=False):
     """Audit a publicly exposed dependency file, if one is
     really there: /composer.lock first, then
@@ -587,7 +624,8 @@ def scan(url, offline=False):
     # budget, so a scan can never run ~5x the deadline.
     end = time.monotonic() + _TOTAL_DEADLINE
     home = _fetch(url, deadline=end)
-    result = {"target": url, "reachable": home["ok"],
+    result = {"schema_version": 1,
+              "target": url, "reachable": home["ok"],
               "http_status": home["status"], "final_url": home["final_url"],
               "error": home.get("error"), "signals": {},
               "php_version": None, "version_source": None,
@@ -673,11 +711,13 @@ def scan(url, offline=False):
     # present un-run probes as negative results.
     coverage = result["coverage"]
 
-    def _probe_fetch(url, ctx=None, deadline=None, max_body=None):
+    def _probe_fetch(url, ctx=None, deadline=None, max_body=None,
+                     early_abort=None):
         coverage["probes_attempted"] += 1
         try:
-            if max_body is not None:
-                r = _fetch(url, deadline=end, max_body=max_body)
+            if max_body is not None or early_abort is not None:
+                r = _fetch(url, deadline=end, max_body=max_body,
+                           early_abort=early_abort)
             else:
                 r = _fetch(url, deadline=end)
         except TypeError:
@@ -744,7 +784,8 @@ def scan(url, offline=False):
     # bounded (_LOCK_MAX_BODY); test doubles written before the
     # max_body parameter fall back to the standard cap.
     def _probe_lock(u):
-        return _probe_fetch(u, max_body=_LOCK_MAX_BODY)
+        return _probe_fetch(u, max_body=_LOCK_MAX_BODY,
+                            early_abort=_lock_early_abort)
 
     lock_info, lock_findings = _exposed_lock(_probe_lock, base,
                                              offline=offline)
