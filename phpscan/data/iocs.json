@@ -127,9 +127,21 @@
   },
   {
    "id": "preg-replace-e-modifier",
-   "regex": "preg_replace\\s*\\(\\s*['\"][^'\"]*/e['\"]",
+   "regex": "preg_replace\\s*\\(\\s*['\"][^'\"]*/[a-z]*e[a-z]*['\"]",
    "severity": "medium",
-   "note": "preg_replace /e modifier (removed in PHP 7) — code execution by regex, common in older shells"
+   "note": "preg_replace /e modifier (removed in PHP 7) — code execution by regex, common in older shells; the modifier list is matched tolerantly (/ei, /ie, /esi all count)"
+  },
+  {
+   "id": "exec-request-input",
+   "regex": "(system|exec|passthru|shell_exec|popen|proc_open)\\s*\\(\\s*\\$_(POST|GET|REQUEST|COOKIE)\\b",
+   "severity": "critical",
+   "note": "OS command execution fed raw request input — unambiguous backdoor idiom"
+  },
+  {
+   "id": "array-map-assert",
+   "regex": "array_map\\s*\\(\\s*['\"]assert['\"]",
+   "severity": "high",
+   "note": "array_map('assert', ...) — indirect eval of array values, a known one-liner backdoor shape"
   },
   {
    "id": "create-function-request",

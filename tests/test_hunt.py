@@ -70,8 +70,13 @@ class FixtureTree(unittest.TestCase):
         w(".hidden.php", "<?php echo 2;\n")
         # Mtime outlier: innocent content, lone fresh mtime.
         w("wp-includes/dropped.php", "<?php echo 3;\n", NEW)
-        # Vendor tree with a loud pattern — skipped by default.
-        w("vendor/pkg/bad.php", "<?php eval($_POST['y']); ?>\n")
+        # Vendor tree with a loud pattern — skipped by default
+        # because acme/pkg is a package in vendor/composer/
+        # installed.json (the only vendor content skipped).
+        w("vendor/composer/installed.json",
+          '{"packages": [{"name": "acme/pkg",'
+          ' "version": "1.0.0"}]}')
+        w("vendor/acme/pkg/bad.php", "<?php eval($_POST['y']); ?>\n")
         self.report = hunt.hunt_local(self.root)
         self.files = _by_file(self.report)
 
@@ -125,10 +130,10 @@ class FixtureTree(unittest.TestCase):
             self.assertNotIn(clean, self.files)
 
     def test_vendor_skipped_by_default_included_on_flag(self):
-        self.assertNotIn("vendor/pkg/bad.php", self.files)
+        self.assertNotIn("vendor/acme/pkg/bad.php", self.files)
         full = _by_file(hunt.hunt_local(self.root,
                                          include_vendor=True))
-        self.assertIn("vendor/pkg/bad.php", full)
+        self.assertIn("vendor/acme/pkg/bad.php", full)
 
     def test_every_finding_has_remediation(self):
         for f in self.report["findings"]:
@@ -192,7 +197,11 @@ class RemoteIndicators(unittest.TestCase):
         def fetch(url, deadline=None):
             for h in hits:
                 if url.endswith(h):
-                    return {"ok": True, "status": 200}
+                    # A hit now requires the shell's signature
+                    # in the body (P2) — a bare 200 proves
+                    # nothing.
+                    return {"ok": True, "status": 200,
+                            "body": "<html>FilesMan</html>"}
             return {"ok": False, "status": 404}
         return fetch
 
