@@ -178,7 +178,9 @@ class OsvWiring(unittest.TestCase):
         self.assertEqual(len(merged), 1)
         f = merged[0]
         self.assertEqual(set(f["sources"]), {"osv", "friendsofphp"})
-        self.assertEqual(f["severity"], "HIGH")
+        # Severity is normalized across sources (P6): OSV's raw
+        # "HIGH" is reported in the shared vocabulary.
+        self.assertEqual(f["severity"], "high")
         self.assertEqual(f["fixed"], "6.5.7")
         # Only names + versions were queried, one batch for the lock.
         self.assertEqual(len(seen), 1)

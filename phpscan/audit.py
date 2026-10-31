@@ -27,7 +27,9 @@ below. Honesty rules, matching the rest of phpscan:
 
 Exit codes: 0 — no findings; 1 — at least one finding;
 2 — usage error or an input that cannot be audited at all
-(missing/unparseable lock file).
+(missing/unparseable lock file); 3 — the audit completed but
+under degraded evidence (OSV could not be consulted and nothing
+else matched), so a clean result must not be trusted as complete.
 """
 
 import json
@@ -353,7 +355,14 @@ def _osv_request(url, payload=None, timeout=20):
 
 def osv_querybatch(packages, timeout=20):
     """packages: list of (name, version-string). Returns the
-    aligned results list from OSV querybatch."""
+    aligned results list from OSV querybatch.
+
+    Versions are sent exactly as the lock spells them, including
+    a leading "v" (v6.5.5): OSV's Packagist matching normalizes
+    that itself — verified live 2026-10-30, when querybatch
+    returned identical vuln sets for 6.5.5 / v6.5.5 and
+    5.6.2 / v5.6.2. Do not "fix" this by stripping the v; the
+    expert-review hypothesis (P7) did not hold."""
     queries = [{"package": {"name": n, "ecosystem": "Packagist"},
                 "version": v} for n, v in packages]
     out = []
@@ -441,7 +450,7 @@ def parse_lock(lock):
 
 
 def run_audit(lock_path, offline=False, osv_batch=None, osv_vuln=None,
-              fop=None, kev=None):
+              fop=None, kev=None, fail_on=None, include_packages=False):
     """Audit the composer.lock at `lock_path`. Returns
     (report_dict, exit_code). The osv_*/fop/kev parameters are
     dependency-injection seams for tests."""
@@ -451,11 +460,13 @@ def run_audit(lock_path, offline=False, osv_batch=None, osv_vuln=None,
         raise ValueError("not a composer.lock (no 'packages' key)")
     return audit_lock(lock, lock_path, offline=offline,
                       osv_batch=osv_batch, osv_vuln=osv_vuln,
-                      fop=fop, kev=kev)
+                      fop=fop, kev=kev, fail_on=fail_on,
+                      include_packages=include_packages)
 
 
 def audit_lock(lock, target, offline=False, osv_batch=None,
-               osv_vuln=None, fop=None, kev=None):
+               osv_vuln=None, fop=None, kev=None, fail_on=None,
+               include_packages=False):
     """Audit an already-parsed composer.lock dict. `target` is
     the label recorded in the report (a file path for the local
     audit, the source URL for an exposed lockfile judged by the
@@ -578,6 +589,16 @@ def audit_lock(lock, target, offline=False, osv_batch=None,
 
     flist = sorted(findings.values(),
                    key=lambda f: (f["package"], f["id"]))
+    # Severity is normalized to one vocabulary across sources
+    # (critical/high/medium/low/unknown) so consumers can gate
+    # on it: an OSV severity word, an OSV CVSS v3 vector banded
+    # by score, KEV membership counting as high, and "unknown"
+    # where no source publishes a level. The raw per-source
+    # strings (None / "HIGH" / a CVSS vector) were unusable for
+    # gating — see severity_level() for the mapping.
+    for f in flist:
+        f["severity"] = severity_level(f) or "unknown"
+    degraded = osv_status.get("status") == "error"
     n_dev = sum(1 for p in pkgs if p["dev"])
     if flist:
         verdict = {"status": "vulnerable", "findings": len(flist),
@@ -585,6 +606,27 @@ def audit_lock(lock, target, offline=False, osv_batch=None,
                              f"{'y' if len(flist) == 1 else 'ies'} "
                              f"affect {len({f['package'] for f in flist})} "
                              f"locked package(s)."}
+        if degraded:
+            verdict["detail"] += (
+                " OSV could not be consulted, so further "
+                "advisories may exist that this audit did not "
+                "see; these findings rest on the vendored "
+                "FriendsOfPHP snapshot and the CISA KEV catalog.")
+    elif degraded:
+        # Never a clean verdict on partial evidence: OSV failed
+        # and only the vendored snapshot was actually consulted,
+        # so the detail names that source alone, the verdict is
+        # marked incomplete, and the exit code (3) lets a CI
+        # gate fail closed instead of passing on a degraded run.
+        verdict = {"status": "no_findings_degraded", "findings": 0,
+                   "incomplete": True,
+                   "detail": "No advisory in the vendored "
+                             "FriendsOfPHP snapshot matches the "
+                             "locked versions — but OSV could not "
+                             "be consulted (its lookup failed), "
+                             "so this audit is incomplete: it is "
+                             "not a clean result and not a "
+                             "general security guarantee."}
     else:
         verdict = {"status": "no_findings", "findings": 0,
                    "detail": "No advisory in OSV or the vendored "
@@ -614,7 +656,23 @@ def audit_lock(lock, target, offline=False, osv_batch=None,
         "unassessed": unassessed,
         "verdict": verdict,
     }
-    return report, 1 if flist else 0
+    if include_packages:
+        # Opt-in only: a lock's full package list is the owner's
+        # dependency inventory, so reports carry counts and
+        # findings by default, never the whole list.
+        report["packages"] = [
+            {"name": p["name"], "version": p["version"],
+             "dev": p["dev"]} for p in pkgs]
+    if not flist:
+        return report, 3 if degraded else 0
+    if fail_on is not None:
+        threshold = _LEVEL_RANK[fail_on]
+        hit = any(_LEVEL_RANK.get(f["severity"], -1) >= threshold
+                  for f in flist)
+        if hit:
+            return report, 1
+        return report, 3 if degraded else 0
+    return report, 1
 
 
 # ----------------------------------------------------------------
@@ -626,6 +684,10 @@ def audit_lock(lock, target, offline=False, osv_batch=None,
 _SEV_WORDS = {"critical": "critical", "high": "high",
               "moderate": "medium", "medium": "medium",
               "low": "low"}
+
+# Gate levels for --fail-on, lowest to highest.
+_LEVEL_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+FAIL_ON_LEVELS = tuple(_LEVEL_RANK)
 
 
 def _cvss3_base_score(vector):
@@ -709,23 +771,52 @@ def severity_level(f):
 
 
 USAGE = ("usage: phpscan audit <composer.lock|directory> [--offline]"
+         " [--fail-on <level>] [--include-packages]"
          "\n\nAudit the packages pinned in a composer.lock against "
          "OSV,\nthe vendored FriendsOfPHP advisory snapshot, and the "
-         "CISA KEV\ncatalog. Prints one JSON report. Exit codes: 0 = "
-         "no findings,\n1 = findings, 2 = usage/input error.")
+         "CISA KEV\ncatalog. Prints one JSON report. Finding "
+         "severities are normalized\nto critical/high/medium/low/"
+         "unknown. --fail-on <level> (one of\ncritical, high, "
+         "medium, low) makes the exit code 1 only when a\nfinding "
+         "reaches that level. --include-packages adds the lock's "
+         "full\npackage list to the report (counts and findings "
+         "only, by default).\nExit codes: 0 = no findings (or none "
+         "at the --fail-on level),\n1 = findings, 2 = usage/input "
+         "error, 3 = audit degraded\n(OSV unreachable, nothing else "
+         "matched — do not trust as clean).")
 
 
 def audit_main(argv):
     offline = False
+    fail_on = None
+    include_packages = False
     positional = []
-    for a in argv:
+    argv = list(argv)
+    i = 0
+    while i < len(argv):
+        a = argv[i]
         if a == "--offline":
             offline = True
+        elif a == "--include-packages":
+            include_packages = True
+        elif a == "--fail-on" or a.startswith("--fail-on="):
+            if a == "--fail-on":
+                i += 1
+                if i >= len(argv):
+                    print(USAGE)
+                    return 2
+                fail_on = argv[i]
+            else:
+                fail_on = a.split("=", 1)[1]
+            if fail_on not in _LEVEL_RANK:
+                print(USAGE)
+                return 2
         elif a.startswith("--"):
             print(USAGE)
             return 2
         else:
             positional.append(a)
+        i += 1
     if len(positional) != 1:
         print(USAGE)
         return 2
@@ -737,7 +828,9 @@ def audit_main(argv):
                           "error": "composer.lock not found"}))
         return 2
     try:
-        report, code = run_audit(target, offline=offline)
+        report, code = run_audit(target, offline=offline,
+                                 fail_on=fail_on,
+                                 include_packages=include_packages)
     except (OSError, ValueError) as e:
         print(json.dumps({"target": target, "mode": "audit",
                           "error": f"cannot audit this file: {e}"}))
