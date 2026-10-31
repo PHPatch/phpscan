@@ -1,12 +1,17 @@
 # Changelog
 
-The package version in `pyproject.toml` is 1.7.0. Signed GitHub
+The package version in `pyproject.toml` is 1.7.2. Signed GitHub
 Releases start with 1.4.4; earlier history below is taken from
 the git log.
 
 ## Unreleased
 
-Second-pass expert-review fixes:
+## 1.7.2 — 2026-10-31
+
+Second-pass expert-review fixes (follow-up external review
+of the 1.7.1 fix release). No new scan surface; each fix
+closes a bypass in a 1.7.1 fix or makes a limited result
+say so:
 
 - Asset `?ver=` versions can no longer be "corroborated" by a
   second asset: one enqueue constant stamps every asset a
@@ -53,6 +58,49 @@ Second-pass expert-review fixes:
   response is plainly not a lockfile (HTML Content-Type, or a
   first non-whitespace byte other than `{`) instead of
   consuming the full 8 MB body.
+
+## 1.7.1 — 2026-10-30
+
+Expert-review fix release (external code review of the 1.7.0
+scanner family). No new scan surface; every change makes an
+existing verdict more honest or more precise.
+
+- **Degraded verdict when OSV is unreachable (P1).** If the
+  OSV lookup fails during an audit, the result is now marked
+  degraded — an audit that could not check vulnerabilities
+  never reports a clean bill of health — and the CLI exits
+  with the dedicated exit code 3 so automation can tell
+  "checked, clean" from "could not check".
+- **Severity normalization + `--fail-on` (P6).** Finding
+  severities are normalized onto one scale across sources,
+  and the new `--fail-on <level>` flag sets the minimum
+  severity that makes the CLI exit non-zero.
+- **Catch-all control for hunt (P2).** Hunt now probes a
+  control path first; a server that answers everything
+  (catch-all) no longer turns every pattern into a hit.
+  Shell-content signatures also recognize uploaded-shell
+  bodies directly, and pattern matching is case-insensitive
+  (P4); paths that are clearly vendor manifests are skipped.
+- **Asset-version confidence (P3).** Versions taken from
+  `?ver=` asset parameters are reported with an explicit,
+  lower confidence and seek corroboration instead of being
+  treated as ground truth.
+- **Coverage block (P5).** Results carry a coverage block
+  stating what was actually checked, so consumers can see
+  the denominator behind a verdict.
+- **Two-signal CMS detection (P9).** A CMS is only reported
+  when two independent signals agree; a single weak signal
+  no longer names the platform.
+- **Client identity + text output (P8).** Requests send an
+  honest `phpscan` User-Agent, and `--format text` produces
+  a plain-text report alongside JSON.
+- **Lockfile honesty (C6).** The 1.7.0 exposed-lockfile
+  audit now probes `installed.json` as well, states the
+  audited scope explicitly, and says so when a lockfile is
+  too large to audit instead of silently skipping it.
+- **P7 investigated, no change:** version strings with a
+  leading `v` were suspected to mismatch OSV ranges; OSV
+  handles the prefix itself, so no normalization was added.
 
 ## 1.7.0 — 2026-10-30
 
