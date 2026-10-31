@@ -161,7 +161,8 @@ def detect_from_homepage(headers, body):
             cur["version"] = version
             cur["version_source"] = source
 
-    def plugin_hit(slug, kind, version=None, source=None):
+    def plugin_hit(slug, kind, version=None, source=None,
+                   asset=None):
         cur = plugins.setdefault(slug, {"kind": kind,
                                         "version": None,
                                         "version_source": None})
@@ -170,15 +171,26 @@ def detect_from_homepage(headers, body):
             # there is: plugins and themes routinely enqueue
             # assets with the WordPress CORE version, a build
             # hash or an mtime instead of their own. It is
-            # recorded, but tagged low-confidence, counted per
-            # distinct value, and — per detect.plugin_findings —
-            # never allowed to escalate a verdict unless a
-            # readme/style.css header or a second asset
-            # corroborates it (see probe_versions).
+            # recorded, but tagged low-confidence, and — per
+            # detect.plugin_findings — it can NEVER escalate a
+            # verdict on its own. Repetition is not
+            # corroboration: the same URL listed twice (a
+            # preload <link> plus the stylesheet <link> is the
+            # common shape), or two different assets, still
+            # trace back to the ONE version constant the plugin
+            # enqueues everything with, so agreement between
+            # assets proves nothing. Only the component's own
+            # declaration — a readme.txt Stable tag or a
+            # style.css Version header — confirms an asset
+            # version (see probe_versions, which sets
+            # version_confirmed). A repeat is kept as
+            # `asset_repeat`, a display-only signal.
             counts = cur.setdefault("asset_version_counts", {})
             counts[version] = counts.get(version, 0) + 1
+            if asset is not None:
+                cur.setdefault("asset_urls", set()).add(asset)
             if counts[version] >= 2:
-                cur["corroborated_by"] = "second asset"
+                cur["asset_repeat"] = True
         if version and not cur["version"]:
             cur["version"] = version
             cur["version_source"] = source
@@ -231,7 +243,7 @@ def detect_from_homepage(headers, body):
             # component's version: no evidence at all.
             ver = None
         plugin_hit(slug, "theme" if kind == "themes" else "plugin",
-                   ver, "asset URL" if ver else None)
+                   ver, "asset URL" if ver else None, asset=rest)
 
     # --- Drupal ---
     if ("drupal" in gen_text.lower()
@@ -301,17 +313,19 @@ def probe_versions(fetch, origin, cms, plugins):
         # readme.txt stable tags for plugins seen without a
         # version (dataset entries first — they matter most),
         # and style.css Version headers for themes. The same
-        # files also CORROBORATE (or replace) a low-confidence
-        # asset-URL version: an equal Stable tag / Version
-        # header confirms it; a different one wins outright,
-        # because those headers are the component's own
-        # declaration, while ?ver= is often the core version.
+        # files also CONFIRM (or replace) a low-confidence
+        # asset-URL version — the only confirmation an asset
+        # version can get: an equal Stable tag / Version
+        # header sets version_confirmed; a different one wins
+        # outright, because those headers are the component's
+        # own declaration, while ?ver= is often the core
+        # version or a shared enqueue constant.
         db = load_plugin_db()
         todo = [s for s, p in plugins.items()
                 if p["kind"] == "plugin"
                 and (not p["version"]
                      or (p.get("confidence") == "low"
-                         and not p.get("corroborated_by")))]
+                         and not p.get("version_confirmed")))]
         todo.sort(key=lambda s: s not in db)
         for slug in todo[:5]:
             r = fetch(f"{origin}/wp-content/plugins/{slug}/"
@@ -329,11 +343,12 @@ def probe_versions(fetch, origin, cms, plugins):
                         hit["version_source"] = \
                             "plugin readme.txt"
                         hit.pop("confidence", None)
+                    hit["version_confirmed"] = True
         themes = [s for s, p in plugins.items()
                   if p["kind"] == "theme"
                   and (not p["version"]
                        or (p.get("confidence") == "low"
-                           and not p.get("corroborated_by")))]
+                           and not p.get("version_confirmed")))]
         for slug in themes[:2]:
             r = fetch(f"{origin}/wp-content/themes/{slug}/"
                       "style.css")
@@ -349,6 +364,7 @@ def probe_versions(fetch, origin, cms, plugins):
                         hit["version_source"] = \
                             "theme style.css"
                         hit.pop("confidence", None)
+                    hit["version_confirmed"] = True
     if "Drupal" in cms and not cms["Drupal"]["version"]:
         for path in ("/core/CHANGELOG.txt", "/CHANGELOG.txt"):
             r = fetch(origin + path)
@@ -415,8 +431,12 @@ def plugin_findings(plugins):
         vt = parse_dotted(version)
         if vt is None:
             continue
+        # Asset-URL evidence alone is never confirmed, no
+        # matter how many assets repeat it; only a readme.txt
+        # Stable tag or a style.css Version header confirms
+        # (probe_versions sets version_confirmed).
         unconfirmed = hit.get("confidence") == "low" \
-            and not hit.get("corroborated_by")
+            and not hit.get("version_confirmed")
         for vuln in entry["vulnerabilities"]:
             clause = match_clause(vt, vuln.get("clauses"))
             if not clause:
@@ -436,9 +456,13 @@ def plugin_findings(plugins):
                     "version comes only from an asset URL "
                     "(?ver=), which plugins routinely set to "
                     "the WordPress core version or a build "
-                    "hash. No readme.txt Stable tag or second "
-                    "asset corroborates it, so this is a lead "
-                    "to check, not a confirmed vulnerability.",
+                    "hash. No readme.txt Stable tag or "
+                    "style.css Version header confirms it — "
+                    "and repeated asset URLs cannot confirm "
+                    "it, because a plugin enqueues all its "
+                    "assets with one version constant — so "
+                    "this is a lead to check, not a confirmed "
+                    "vulnerability.",
                     f"Confirm the installed {name} version on "
                     "the server (or via its readme.txt Stable "
                     "tag); if it is below "
@@ -542,6 +566,7 @@ def analyze(headers, body, fetch=None, origin=None, pre_cms=()):
             "version_source": hit["version_source"],
             "confidence": hit.get("confidence"),
             "corroborated_by": hit.get("corroborated_by"),
+            "asset_repeat": bool(hit.get("asset_repeat")),
             "vulnerabilities": hit.get("vulnerabilities", []),
         })
     findings = plugin_findings(plugins) + cms_findings(cms)
