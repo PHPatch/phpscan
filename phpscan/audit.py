@@ -450,7 +450,8 @@ def parse_lock(lock):
 
 
 def run_audit(lock_path, offline=False, osv_batch=None, osv_vuln=None,
-              fop=None, kev=None, fail_on=None, include_packages=False):
+              fop=None, kev=None, fail_on=None, include_packages=False,
+              ignore_unrated=False):
     """Audit the composer.lock at `lock_path`. Returns
     (report_dict, exit_code). The osv_*/fop/kev parameters are
     dependency-injection seams for tests."""
@@ -461,12 +462,13 @@ def run_audit(lock_path, offline=False, osv_batch=None, osv_vuln=None,
     return audit_lock(lock, lock_path, offline=offline,
                       osv_batch=osv_batch, osv_vuln=osv_vuln,
                       fop=fop, kev=kev, fail_on=fail_on,
-                      include_packages=include_packages)
+                      include_packages=include_packages,
+                      ignore_unrated=ignore_unrated)
 
 
 def audit_lock(lock, target, offline=False, osv_batch=None,
                osv_vuln=None, fop=None, kev=None, fail_on=None,
-               include_packages=False):
+               include_packages=False, ignore_unrated=False):
     """Audit an already-parsed composer.lock dict. `target` is
     the label recorded in the report (a file path for the local
     audit, the source URL for an exposed lockfile judged by the
@@ -640,6 +642,7 @@ def audit_lock(lock, target, offline=False, osv_batch=None,
                               f"are listed under 'unassessed' — no "
                               f"verdict is claimed for them.")
     report = {
+        "schema_version": 1,
         "target": target,
         "mode": "audit",
         "packages_scanned": len(pkgs) - n_dev,
@@ -667,9 +670,21 @@ def audit_lock(lock, target, offline=False, osv_batch=None,
         return report, 3 if degraded else 0
     if fail_on is not None:
         threshold = _LEVEL_RANK[fail_on]
-        hit = any(_LEVEL_RANK.get(f["severity"], -1) >= threshold
-                  for f in flist)
-        if hit:
+
+        def _meets(f):
+            if f["severity"] == "unknown":
+                # Unrated fails CLOSED. A source that publishes
+                # no severity — every FriendsOfPHP-only finding —
+                # is not evidence of low severity, so an unrated
+                # finding counts as meeting every threshold: a
+                # gate set even at 'low' must not pass on a
+                # known-vulnerable dependency just because its
+                # advisory carries no CVSS. --ignore-unrated is
+                # the explicit opt-out for the opposite policy.
+                return not ignore_unrated
+            return _LEVEL_RANK.get(f["severity"], -1) >= threshold
+
+        if any(_meets(f) for f in flist):
             return report, 1
         return report, 3 if degraded else 0
     return report, 1
@@ -771,25 +786,33 @@ def severity_level(f):
 
 
 USAGE = ("usage: phpscan audit <composer.lock|directory> [--offline]"
-         " [--fail-on <level>] [--include-packages]"
+         " [--fail-on <level>] [--ignore-unrated] "
+         "[--include-packages]"
          "\n\nAudit the packages pinned in a composer.lock against "
          "OSV,\nthe vendored FriendsOfPHP advisory snapshot, and the "
          "CISA KEV\ncatalog. Prints one JSON report. Finding "
          "severities are normalized\nto critical/high/medium/low/"
          "unknown. --fail-on <level> (one of\ncritical, high, "
          "medium, low) makes the exit code 1 only when a\nfinding "
-         "reaches that level. --include-packages adds the lock's "
-         "full\npackage list to the report (counts and findings "
-         "only, by default).\nExit codes: 0 = no findings (or none "
-         "at the --fail-on level),\n1 = findings, 2 = usage/input "
-         "error, 3 = audit degraded\n(OSV unreachable, nothing else "
-         "matched — do not trust as clean).")
+         "reaches that level. A finding whose sources publish no\n"
+         "severity ('unknown' — every FriendsOfPHP-only finding) "
+         "counts\nas reaching EVERY level: unrated fails closed, "
+         "because no\nseverity published is not evidence of low "
+         "severity. Pass\n--ignore-unrated for the opposite policy "
+         "(unrated findings\nnever trip the gate). --include-packages "
+         "adds the lock's full\npackage list to the report (counts "
+         "and findings only, by default).\nExit codes: 0 = no "
+         "findings (or none at the --fail-on level),\n1 = findings, "
+         "2 = usage/input error, 3 = audit degraded\n(OSV "
+         "unreachable, nothing else matched — do not trust as "
+         "clean).")
 
 
 def audit_main(argv):
     offline = False
     fail_on = None
     include_packages = False
+    ignore_unrated = False
     positional = []
     argv = list(argv)
     i = 0
@@ -799,6 +822,8 @@ def audit_main(argv):
             offline = True
         elif a == "--include-packages":
             include_packages = True
+        elif a == "--ignore-unrated":
+            ignore_unrated = True
         elif a == "--fail-on" or a.startswith("--fail-on="):
             if a == "--fail-on":
                 i += 1
@@ -830,7 +855,8 @@ def audit_main(argv):
     try:
         report, code = run_audit(target, offline=offline,
                                  fail_on=fail_on,
-                                 include_packages=include_packages)
+                                 include_packages=include_packages,
+                                 ignore_unrated=ignore_unrated)
     except (OSError, ValueError) as e:
         print(json.dumps({"target": target, "mode": "audit",
                           "error": f"cannot audit this file: {e}"}))
