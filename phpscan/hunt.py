@@ -19,8 +19,17 @@ signature. Even then it is an indicator to investigate,
 never a conclusion.
 
 Safety: strictly read-only. Hunt never modifies, moves,
-quarantines or executes anything it scans. vendor/ package
-directories are skipped unless --include-vendor is given.
+quarantines or executes anything it scans. Inside composer
+package directories listed in vendor/composer/installed.json,
+only the high-severity rules run by default (request-input
+eval/exec, shell fingerprints, auto_prepend_file persistence,
+known-bad hashes): planting a shell inside a real package is
+the normal way to hide in vendor/, and a forged installed.json
+must not be able to hide a tree from those rules. The noisy
+rules (low/medium patterns, special-dir, double-extension,
+dotfile and modification-time heuristics) are what is skipped
+there, and the report says so, with counts. --include-vendor
+runs every rule everywhere.
 """
 
 import hashlib
@@ -34,8 +43,14 @@ import time
 _DATA = os.path.join(os.path.dirname(__file__), "data", "iocs.json")
 
 _PHP_EXTS = (".php", ".phtml", ".php3", ".php4", ".php5", ".phps", ".phar")
-_MAX_FILE = 1024 * 1024          # content-scan cap per file
+_MAX_FILE = 1024 * 1024          # "oversize" listing threshold
+_HARD_CAP = 16 * 1024 * 1024     # streaming hard cap per file
+_CHUNK = 256 * 1024              # streaming read chunk
 _MAX_FILES = 20000               # tree-walk cap
+# Severities whose rules run EVERYWHERE, including inside
+# composer package directories: the unambiguous backdoor
+# idioms. Anything noisier is what vendor mode reduces.
+_HIGH_SEVS = ("critical", "high")
 _REMEDIATION = (
     "Quarantine the file (move it out of the webroot; do not "
     "execute it), restore the site from a clean source, rotate "
@@ -71,31 +86,41 @@ _PERSIST_RE = re.compile(
     r"([^\s\"']+)", re.I)
 
 
-def _scan_content(path, size, cap):
-    """Read a file for content checks. Returns (raw, text):
-    raw is the FULL raw bytes when the file fits the cap (the
-    only honest input to a SHA-256), else None; text is the
-    decoded content — for an oversize file, its first and last
-    `cap` bytes, so padding a shell with megabytes of spaces no
-    longer hides the payload at the end of the file. Both are
-    None for binary/unreadable files."""
+def _scan_content(path, size, cap=_HARD_CAP):
+    """Stream a file for content checks, in chunks, up to
+    `cap` bytes (the hard cap, 16 MB by default). Returns
+    (raw, text, scanned):
+
+    - raw: the FULL raw bytes when the whole file was read
+      (the only honest input to a SHA-256), else None;
+    - text: the decoded content of everything read — the
+      whole file when it fits the cap, NOT head+tail, so a
+      payload padded into the middle of a multi-megabyte
+      file is seen exactly like one at either end;
+    - scanned: bytes actually read (== size when the file
+      fits the cap, == cap when it does not; the remainder
+      is reported by the caller as unscanned).
+
+    raw and text are both None for binary/unreadable files."""
     try:
-        if size <= cap:
-            with open(path, "rb") as f:
-                raw = f.read()
-            if b"\x00" in raw[:4096]:    # binary — not PHP source
-                return None, None
-            return raw, raw.decode("utf-8", "replace")
+        chunks, got, complete = [], 0, False
         with open(path, "rb") as f:
-            head = f.read(cap)
-            if b"\x00" in head[:4096]:
-                return None, None
-            f.seek(max(0, size - cap))
-            tail = f.read(cap)
+            while got < cap:
+                chunk = f.read(min(_CHUNK, cap - got))
+                if not chunk:
+                    complete = True
+                    break
+                if not chunks and b"\x00" in chunk[:4096]:
+                    return None, None, 0  # binary — not PHP source
+                chunks.append(chunk)
+                got += len(chunk)
+            else:
+                complete = got >= size
     except OSError:
-        return None, None
-    return None, head.decode("utf-8", "replace") + "\n" + \
-        tail.decode("utf-8", "replace")
+        return None, None, 0
+    raw = b"".join(chunks)
+    return (raw if complete else None), \
+        raw.decode("utf-8", "replace"), got
 
 
 def _installed_package_dirs(vendor_root):
@@ -130,10 +155,16 @@ def _installed_package_dirs(vendor_root):
 
 
 def hunt_local(root, include_vendor=False, max_file=_MAX_FILE,
-               max_files=_MAX_FILES):
+               max_files=_MAX_FILES, hard_cap=_HARD_CAP):
     """Walk `root` and return the hunt report dict (see hunt_main
     for the CLI). Pure and read-only; raises ValueError on a bad
-    root so the caller can map it to a usage error."""
+    root so the caller can map it to a usage error.
+
+    `max_file` is the threshold above which a file is listed
+    under 'oversize_files' (it is still scanned in full, by
+    streaming); `hard_cap` is the per-file streaming cap —
+    bytes past it are reported as unscanned, never silently
+    dropped."""
     if not os.path.isdir(root):
         raise ValueError(f"not a directory: {root}")
     iocs = load_iocs()
@@ -147,14 +178,22 @@ def hunt_local(root, include_vendor=False, max_file=_MAX_FILE,
     special = set(d.lower() for d in iocs["special_dirs"])
 
     findings, php_files = [], []     # php_files: (relpath, mtime)
-    scanned, limited, oversize = 0, False, 0
+    scanned, limited = 0, False
+    oversize = []          # [{path, size, scanned_bytes}]
+    unscanned = 0
+    vendor_dirs = set()    # package dirs scanned reduced-rules
+    vendor_files = 0       # files scanned with reduced rules
     pkg_dir_cache = {}
 
     def in_vendor_package(parts):
         """True when the directory `parts` (relative components)
         is, or sits inside, a composer package directory of the
-        first vendor/ tree on the path — the only vendor content
-        skipped without --include-vendor."""
+        first vendor/ tree on the path, per that tree's
+        composer/installed.json. Inside such a directory the
+        noisy rules are reduced (see the walk) — never the
+        high-severity ones, so neither a planted shell inside
+        a real package nor a forged manifest can hide from
+        them."""
         low_parts = [p.lower() for p in parts]
         if "vendor" not in low_parts:
             return False
@@ -172,9 +211,9 @@ def hunt_local(root, include_vendor=False, max_file=_MAX_FILE,
     for dirpath, dirnames, filenames in os.walk(root):
         rel_dir = os.path.relpath(dirpath, root)
         parts = [] if rel_dir == "." else rel_dir.split(os.sep)
-        if not include_vendor and in_vendor_package(parts):
-            dirnames[:] = []
-            continue
+        in_pkg = not include_vendor and in_vendor_package(parts)
+        if in_pkg:
+            vendor_dirs.add("/".join(parts))
         in_special = any(p.lower() in special for p in parts)
         for name in filenames:
             if scanned >= max_files:
@@ -185,20 +224,30 @@ def hunt_local(root, include_vendor=False, max_file=_MAX_FILE,
             low = name.lower()
             if low in fname_iocs:
                 e = fname_iocs[low]
-                findings.append(_finding(
-                    rel, f"filename:{low}", e["severity"],
-                    f"Famous webshell filename ({e['note']})."))
+                # A famous shell filename is a high-severity
+                # signal even inside a package; the medium
+                # dropper names (x.php, 1.php) are noisy there
+                # and are part of the reduced set.
+                if not in_pkg or e["severity"] in _HIGH_SEVS:
+                    findings.append(_finding(
+                        rel, f"filename:{low}", e["severity"],
+                        f"Famous webshell filename ({e['note']})."))
             if low in _CONFIG_FILES:
                 # Persistence check: auto_prepend/append_file in
                 # .user.ini / .htaccess / php.ini makes the server
-                # execute an attacker file on every request.
+                # execute an attacker file on every request. It
+                # runs everywhere, vendor packages included.
                 try:
                     size = os.path.getsize(full)
                 except OSError:
                     continue
+                _raw, text, n_read = _scan_content(
+                    full, size, hard_cap)
                 if size > max_file:
-                    oversize += 1
-                _raw, text = _scan_content(full, size, max_file)
+                    oversize.append({"path": rel, "size": size,
+                                     "scanned_bytes": n_read})
+                    if text is not None:
+                        unscanned += max(0, size - n_read)
                 if text:
                     for m in _PERSIST_RE.finditer(text):
                         target = m.group(2)
@@ -220,32 +269,45 @@ def hunt_local(root, include_vendor=False, max_file=_MAX_FILE,
                 st = os.stat(full)
             except OSError:
                 continue
-            php_files.append((rel, st.st_mtime))
-            if in_special and low.endswith(_PHP_EXTS):
-                findings.append(_finding(
-                    rel, "php-in-special-dir", "high",
-                    "Executable PHP inside an upload/media/cache "
-                    "directory, where user-supplied files land and "
-                    "PHP should never run."))
-            if re.search(r"\.(php\d?|phtml)\.", low):
-                findings.append(_finding(
-                    rel, "double-extension", "medium",
-                    "PHP extension mid-filename (e.g. .php.jpg): "
-                    "misconfigured servers may execute it as PHP."))
-            if name.startswith("."):
-                findings.append(_finding(
-                    rel, "hidden-php-dotfile", "medium",
-                    "Hidden dotfile containing PHP — a classic "
-                    "place to stash a backdoor out of plain sight."))
+            if in_pkg:
+                vendor_files += 1
+            else:
+                # The mtime heuristic does not run inside
+                # packages: vendor files are excluded from the
+                # release-cluster corpus entirely.
+                php_files.append((rel, st.st_mtime))
+                if in_special and low.endswith(_PHP_EXTS):
+                    findings.append(_finding(
+                        rel, "php-in-special-dir", "high",
+                        "Executable PHP inside an upload/media/"
+                        "cache directory, where user-supplied "
+                        "files land and PHP should never run."))
+                if re.search(r"\.(php\d?|phtml)\.", low):
+                    findings.append(_finding(
+                        rel, "double-extension", "medium",
+                        "PHP extension mid-filename (e.g. "
+                        ".php.jpg): misconfigured servers may "
+                        "execute it as PHP."))
+                if name.startswith("."):
+                    findings.append(_finding(
+                        rel, "hidden-php-dotfile", "medium",
+                        "Hidden dotfile containing PHP — a "
+                        "classic place to stash a backdoor out "
+                        "of plain sight."))
+            raw, text, n_read = _scan_content(
+                full, st.st_size, hard_cap)
             if st.st_size > max_file:
-                oversize += 1
-            raw, text = _scan_content(full, st.st_size, max_file)
+                oversize.append({"path": rel, "size": st.st_size,
+                                 "scanned_bytes": n_read})
+                if text is not None:
+                    unscanned += max(0, st.st_size - n_read)
             if text is None:
                 continue
             if hashes and raw is not None:
                 # SHA-256 over the RAW BYTES: hashing a decoded/
                 # re-encoded text round-trip can never match a
-                # published hash for a non-UTF-8 file.
+                # published hash for a non-UTF-8 file. Runs
+                # everywhere, vendor packages included.
                 digest = hashlib.sha256(raw).hexdigest()
                 if digest in hashes:
                     findings.append(_finding(
@@ -253,6 +315,12 @@ def hunt_local(root, include_vendor=False, max_file=_MAX_FILE,
                         "SHA-256 matches a published webshell "
                         "hash in the IOC set."))
             for pid, rx, sev, note in patterns:
+                if in_pkg and sev not in _HIGH_SEVS:
+                    # Reduced rules inside packages: the noisy
+                    # medium/low idioms (preg_replace /e, plain
+                    # eval) are skipped; the unambiguous
+                    # high-severity backdoor idioms are not.
+                    continue
                 if rx.search(text):
                     findings.append(_finding(
                         rel, f"pattern:{pid}", sev,
@@ -274,22 +342,59 @@ def hunt_local(root, include_vendor=False, max_file=_MAX_FILE,
                   "idioms, and a clean result does not rule out a "
                   "novel or database-resident compromise.")
     if oversize:
-        detail += (f" {oversize} file(s) exceeded the "
-                   f"{max_file}-byte content cap and were "
-                   "scanned by their first and last "
-                   f"{max_file} bytes only (listed under "
-                   "'oversize_files').")
+        detail += (f" {len(oversize)} file(s) larger than "
+                   f"{max_file} bytes were scanned by streaming "
+                   "and are listed under 'oversize_files' with "
+                   "their sizes and scanned byte counts.")
+        if unscanned:
+            detail += (f" {unscanned} byte(s) past the "
+                       f"{hard_cap}-byte per-file hard cap were "
+                       "not scanned.")
+    # The verdict text itself discloses any reduction of the
+    # scan — a report field alone is not disclosure, because
+    # the verdict is the part people read.
+    incomplete_causes = []
+    if limited:
+        incomplete_causes.append(
+            f"the {max_files}-file walk cap was reached")
+    if vendor_files:
+        detail += (
+            f" {vendor_files} file(s) in {len(vendor_dirs)} "
+            "vendor package director"
+            f"{'y' if len(vendor_dirs) == 1 else 'ies'} were "
+            "scanned with high-severity rules only: the noisy "
+            "low/medium rules and the modification-time check "
+            "do not run inside composer packages, so a shell "
+            "that trips only those rules would not be reported "
+            "there (pass --include-vendor to scan vendor in "
+            "full).")
+        incomplete_causes.append(
+            "vendor packages were scanned with reduced rules")
+    if unscanned:
+        incomplete_causes.append(
+            f"{unscanned} byte(s) exceeded the per-file hard "
+            "cap and were not scanned")
+    incomplete = bool(incomplete_causes)
+    if incomplete:
+        detail += (" This result is incomplete: "
+                   + "; ".join(incomplete_causes) + ".")
     return {
+        "schema_version": 1,
         "target": os.path.abspath(root),
         "mode": "local",
         "scanned_php_files": scanned,
         "oversize_files": oversize,
+        "unscanned_bytes": unscanned,
         "limits_hit": limited,
-        "vendor_skipped": not include_vendor,
+        "vendor_skipped": vendor_files > 0,
+        "vendor_partial_files": vendor_files,
+        "vendor_partial_dirs": sorted(vendor_dirs),
+        "incomplete": incomplete,
         "findings": findings,
         "verdict": {
             "status": "findings" if findings else "clean",
             "worst_severity": worst,
+            "incomplete": incomplete,
             "detail": detail,
         },
     }
@@ -353,14 +458,17 @@ def remote_indicators(fetch, base, deadline=None, catch_all=None):
 
     A bare 200 is NOT evidence: the catch-all control runs
     first (unless the caller already ran it and passes
-    `catch_all`), and a shell path is only reported when its
-    body carries a known shell family's self-identification
-    signature — the same standard the local hunt applies.
-    A 200 without a signature (a catch-all site, a honeypot
-    page, an empty file) is silently dropped, never dressed
-    up as an indicator. Returns a list of indicator dicts;
-    an indicator is still a lead, never a conclusion (see
-    data/iocs.json remote_note)."""
+    `catch_all`), and a shell path is only reported as an
+    indicator when its body carries a known shell family's
+    self-identification signature — the same standard the
+    local hunt applies. A signature-less 200 on a CATCH-ALL
+    site is dropped: there, a 200 carries no information at
+    all. On a site that is NOT a catch-all, the same 200 is
+    path-specific, so it earns a low-severity "review
+    manually" note instead of a silent drop — it is never
+    dressed up as an indicator of compromise. Returns a list
+    of indicator dicts; an indicator is still a lead, never
+    a conclusion (see data/iocs.json remote_note)."""
     if catch_all is None:
         catch_all, _ = catch_all_control(fetch, base,
                                           deadline=deadline)
@@ -374,6 +482,31 @@ def remote_indicators(fetch, base, deadline=None, catch_all=None):
         sig = next((pid for pid, rx in fingerprints
                     if rx.search(body)), None)
         if sig is None:
+            if not catch_all:
+                out.append({
+                    "path": path, "status": 200,
+                    "indicator": "known-shell-path-unconfirmed",
+                    "severity": "low",
+                    "detail": "A file with a known webshell "
+                              "name answers at this public "
+                              "path, but its body carries no "
+                              "known shell signature. This host "
+                              "is not a catch-all (a random "
+                              "nonexistent path does not answer "
+                              "200), so the 200 is specific to "
+                              "this path: the file may be an "
+                              "empty placeholder, a honeypot, "
+                              "or a shell family this scanner "
+                              "has no fingerprint for. Worth a "
+                              "manual look — not an indicator "
+                              "of compromise by itself.",
+                    "remediation": "Open the file on the "
+                                   "server and check its "
+                                   "contents, size and "
+                                   "modification time; if it is "
+                                   "not a deliberate placeholder "
+                                   "or honeypot, treat it as "
+                                   "hostile: " + _REMEDIATION})
             continue
         out.append({
             "path": path, "status": 200,
@@ -394,7 +527,11 @@ _USAGE = """usage: phpscan hunt <webroot> [--include-vendor]
 Read-only compromise check of a webroot you own: known webshell
 fingerprints, backdoor idioms, PHP in upload dirs, double
 extensions, hidden PHP dotfiles, mtime outliers. Prints a JSON
-report. Exit codes: 0 clean, 1 findings, 2 usage error."""
+report. Exit codes: 0 clean, 1 findings, 2 usage error,
+3 clean but incomplete (the walk cap was hit, bytes past the
+per-file hard cap went unscanned, or vendor packages were
+scanned with high-severity rules only — see --include-vendor;
+an incomplete clean is not a full clean)."""
 
 
 def hunt_main(argv):
@@ -415,4 +552,9 @@ def hunt_main(argv):
         print(json.dumps({"target": args[0], "error": str(e)}))
         return 2
     print(json.dumps(report, indent=1))
-    return 1 if report["findings"] else 0
+    if report["findings"]:
+        return 1
+    # No findings, but the scan did not cover everything it
+    # claims to cover: the family convention is exit 3
+    # (judged under degraded evidence), never a silent clean.
+    return 3 if report.get("incomplete") else 0
