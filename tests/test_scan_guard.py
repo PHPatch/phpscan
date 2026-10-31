@@ -615,7 +615,10 @@ class CliExitCodes(unittest.TestCase):
         self.assertEqual(self._run(["unreachable"]), 2)
 
     def test_worst_code_wins(self):
-        self.assertEqual(self._run(["vulnerable", "not_assessed"]), 2)
+        # Precedence, not numeric max: findings (1) outrank
+        # cannot-judge (2) — a vulnerable target must never be
+        # masked by an unreachable one in the same run.
+        self.assertEqual(self._run(["vulnerable", "not_assessed"]), 1)
         self.assertEqual(self._run(["patched", "vulnerable"]), 1)
 
     def test_no_args_is_usage_error(self):

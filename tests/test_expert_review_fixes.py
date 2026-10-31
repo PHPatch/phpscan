@@ -137,9 +137,16 @@ class P6SeverityAndFailOn(unittest.TestCase):
         self.assertEqual(f["severity"], "critical")  # 9.8 band
 
     def test_fail_on_thresholds(self):
-        # Vuln lock's highest normalized severity is high (KEV).
+        # Vuln lock's highest RATED severity is high (KEV), but
+        # it also carries an unrated (unknown) finding, which
+        # fails closed: it meets every threshold by default.
         _, code = audit.run_audit(VULN_LOCK, offline=True,
                                   fail_on="critical")
+        self.assertEqual(code, 1)
+        # The explicit opt-out restores rated-only gating.
+        _, code = audit.run_audit(VULN_LOCK, offline=True,
+                                  fail_on="critical",
+                                  ignore_unrated=True)
         self.assertEqual(code, 0)
         _, code = audit.run_audit(VULN_LOCK, offline=True,
                                   fail_on="high")
@@ -149,7 +156,11 @@ class P6SeverityAndFailOn(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(
                 cli.main(["audit", VULN_LOCK, "--offline",
-                          "--fail-on", "critical"]), 0)
+                          "--fail-on", "critical"]), 1)
+            self.assertEqual(
+                cli.main(["audit", VULN_LOCK, "--offline",
+                          "--fail-on", "critical",
+                          "--ignore-unrated"]), 0)
             self.assertEqual(
                 cli.main(["audit", VULN_LOCK, "--offline",
                           "--fail-on=high"]), 1)
@@ -220,15 +231,23 @@ class P2RemoteIndicators(unittest.TestCase):
             controls[0],
             r"/phpatch-[0-9a-f]{16}\.php$")
 
-    def test_bare_200_without_signature_dropped(self):
+    def test_bare_200_without_signature_low_note(self):
+        # N7 (second pass): on a NON-catch-all host the 200 is
+        # path-specific, so a signature-less 200 earns a
+        # low-severity review note instead of a silent drop.
+        # (On a catch-all host it is still dropped — see
+        # test_catch_all_site_yields_no_indicators above.)
         def fetch(url, deadline=None):
             if url.endswith("/c99.php"):
                 return {"ok": True, "status": 200,
                         "body": "<html>empty placeholder</html>"}
             return {"ok": False, "status": 404}
-        self.assertEqual(
-            hunt.remote_indicators(fetch, "https://example.com"),
-            [])
+        out = hunt.remote_indicators(fetch, "https://example.com")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["indicator"],
+                         "known-shell-path-unconfirmed")
+        self.assertEqual(out[0]["severity"], "low")
+        self.assertIn("manual look", out[0]["detail"])
 
     def test_signature_confirms_even_on_catch_all(self):
         def fetch(url, deadline=None):
@@ -288,20 +307,29 @@ class P3AssetVersionConfidence(unittest.TestCase):
             {"status": "patched", "detail": "fine"}, findings)
         self.assertEqual(v["status"], "patched")
 
-    def test_second_asset_corroborates(self):
+    def test_second_asset_does_not_corroborate(self):
+        # N1 (second pass): a second asset repeating the same
+        # ?ver= is NOT corroboration — one enqueue constant
+        # stamps every asset a plugin ships. The finding must
+        # stay info-level; only readme.txt / style.css confirm.
         body = FM_HOME.replace(
             "</head>",
             '<script src="https://example.com/wp-content/plugins/'
             'wp-file-manager/js/other.js?ver=6.8"></script></head>')
         _, plugins = detect.detect_from_homepage({}, body)
         hit = plugins["wp-file-manager"]
-        self.assertEqual(hit.get("corroborated_by"),
-                         "second asset")
+        self.assertTrue(hit.get("asset_repeat"))
+        self.assertNotEqual(hit.get("corroborated_by"),
+                            "second asset")
+        self.assertFalse(hit.get("version_confirmed"))
         findings = detect.plugin_findings(plugins)
         crit = [f for f in findings
                 if f["kind"] == "plugin_vulnerable"]
-        self.assertEqual(len(crit), 1)
-        self.assertEqual(crit[0]["severity"], "critical")
+        self.assertEqual(crit, [])
+        unc = [f for f in findings
+               if f["kind"] == "plugin_version_unconfirmed"]
+        self.assertEqual(len(unc), 1)
+        self.assertEqual(unc[0]["severity"], "info")
 
 
 # ----------------------------------------------------------------
@@ -384,17 +412,29 @@ class P4HuntGaps(unittest.TestCase):
                if f["indicator"] == "auto-prepend-append"}
         self.assertEqual(sev, {"high"})
 
-    def test_oversize_scanned_head_and_tail(self):
+    def test_oversize_file_scanned_by_streaming(self):
         payload = (b"<?php /*" + b"A" * (1100 * 1000)
                    + b"*/ eval($_POST['x']); ?>")
         _write(self.root, "big.php", payload)
         r = hunt.hunt_local(self.root)
-        self.assertEqual(r["oversize_files"], 1)
+        # N5: oversize_files is a list of {path, size,
+        # scanned_bytes}, and the file is streamed in full —
+        # a payload at the END is found just like one at the
+        # start (head+tail sampling is gone).
+        self.assertEqual(len(r["oversize_files"]), 1)
+        entry = r["oversize_files"][0]
+        self.assertEqual(entry["path"], "big.php")
+        self.assertEqual(entry["size"], len(payload))
+        self.assertEqual(entry["scanned_bytes"], len(payload))
         self.assertIn("pattern:eval-request-input",
                       self._indicators(r, "big.php"))
         self.assertIn("oversize_files", r["verdict"]["detail"])
 
-    def test_rogue_vendor_dir_scanned(self):
+    def test_vendor_rules_split(self):
+        # N2 (second pass): a directory NOT in installed.json
+        # gets full rules; a LISTED package gets high-severity
+        # rules — a shell planted inside a real package is
+        # found, not skipped.
         _write(self.root, "vendor/composer/installed.json",
                '{"packages": [{"name": "acme/pkg",'
                ' "version": "1.0.0"}]}')
@@ -405,8 +445,8 @@ class P4HuntGaps(unittest.TestCase):
         r = hunt.hunt_local(self.root)
         self.assertIn("pattern:eval-request-input",
                       self._indicators(r, "vendor/rogue/drop.php"))
-        self.assertNotIn("vendor/acme/pkg/lib.php",
-                         {f["file"] for f in r["findings"]})
+        self.assertIn("pattern:eval-request-input",
+                      self._indicators(r, "vendor/acme/pkg/lib.php"))
 
     def test_hash_over_raw_bytes(self):
         raw = b"<?php $x = '\xff\xfe'; ?>\n"

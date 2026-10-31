@@ -70,9 +70,10 @@ class FixtureTree(unittest.TestCase):
         w(".hidden.php", "<?php echo 2;\n")
         # Mtime outlier: innocent content, lone fresh mtime.
         w("wp-includes/dropped.php", "<?php echo 3;\n", NEW)
-        # Vendor tree with a loud pattern — skipped by default
-        # because acme/pkg is a package in vendor/composer/
-        # installed.json (the only vendor content skipped).
+        # Vendor tree with a loud pattern inside a package
+        # listed in vendor/composer/installed.json: the
+        # high-severity rules still run there by default (only
+        # the noisy rules are reduced inside packages).
         w("vendor/composer/installed.json",
           '{"packages": [{"name": "acme/pkg",'
           ' "version": "1.0.0"}]}')
@@ -129,8 +130,13 @@ class FixtureTree(unittest.TestCase):
         for clean in ("index.php", "wp-load.php", "wp-config.php"):
             self.assertNotIn(clean, self.files)
 
-    def test_vendor_skipped_by_default_included_on_flag(self):
-        self.assertNotIn("vendor/acme/pkg/bad.php", self.files)
+    def test_vendor_high_severity_rules_run_by_default(self):
+        # N2: bad.php inside the listed acme/pkg package holds
+        # eval($_POST) — a high-severity idiom — so it is
+        # found even without --include-vendor. The flag still
+        # governs the noisy rules (see the FixtureTree benign
+        # vendor file in test_second_pass_fixes).
+        self.assertIn("vendor/acme/pkg/bad.php", self.files)
         full = _by_file(hunt.hunt_local(self.root,
                                          include_vendor=True))
         self.assertIn("vendor/acme/pkg/bad.php", full)
