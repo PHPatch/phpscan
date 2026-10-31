@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phpscan"
-version = "1.7.0"
+version = "1.7.2"
 description = "Free external PHP vulnerability scanner (php2shell / CVE-2026-109618, CVE-2026-109619) — passive fingerprinting plus limited, read-only path checks. No exploit probes."
 readme = "README.md"
 license = { text = "MIT" }
