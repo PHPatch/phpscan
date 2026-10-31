@@ -132,6 +132,18 @@ def _generators(body):
     return out
 
 
+def _in_tag_context(body, needle):
+    """True when `needle` appears inside a tag attribute
+    (src=/href=/content=...) — i.e. the page actually loads or
+    declares the thing, as opposed to merely mentioning it in
+    prose. A blog post about WordPress contains the word
+    "wp-content"; that is not evidence the site RUNS
+    WordPress."""
+    rx = re.compile(r'(?:src|href|content)\s*=\s*["\'][^"\']*'
+                    + re.escape(needle), re.I)
+    return bool(rx.search(body or ""))
+
+
 def detect_from_homepage(headers, body):
     """Return (cms_hits, plugin_hits) from the homepage alone.
 
@@ -153,9 +165,25 @@ def detect_from_homepage(headers, body):
         cur = plugins.setdefault(slug, {"kind": kind,
                                         "version": None,
                                         "version_source": None})
+        if source == "asset URL" and version:
+            # An asset's ?ver= is the weakest version evidence
+            # there is: plugins and themes routinely enqueue
+            # assets with the WordPress CORE version, a build
+            # hash or an mtime instead of their own. It is
+            # recorded, but tagged low-confidence, counted per
+            # distinct value, and — per detect.plugin_findings —
+            # never allowed to escalate a verdict unless a
+            # readme/style.css header or a second asset
+            # corroborates it (see probe_versions).
+            counts = cur.setdefault("asset_version_counts", {})
+            counts[version] = counts.get(version, 0) + 1
+            if counts[version] >= 2:
+                cur["corroborated_by"] = "second asset"
         if version and not cur["version"]:
             cur["version"] = version
             cur["version_source"] = source
+            if source == "asset URL":
+                cur["confidence"] = "low"
 
     gens = _generators(body)
     gen_text = " | ".join(gens)
@@ -165,17 +193,27 @@ def detect_from_homepage(headers, body):
         gen_text += " | " + xgen
 
     # --- WordPress ---
-    if ("wp-content" in low or "wp-includes" in low
-            or "wordpress" in gen_text.lower()
-            or "api.w.org" in _h(headers, "Link")):
+    # Detection discipline: ONE bare substring is never enough
+    # (prose mentions are not fingerprints). A hit needs either
+    # a signal in tag/attribute/header context, or TWO
+    # independent signals.
+    wp_strong = ("wordpress" in gen_text.lower()
+                 or "api.w.org" in _h(headers, "Link")
+                 or _in_tag_context(body, "wp-content/")
+                 or _in_tag_context(body, "wp-includes/"))
+    wp_weak = (("wp-content" in low) + ("wp-includes" in low))
+    core_version = None
+    if wp_strong or wp_weak >= 2:
         cms_hit("WordPress")
         m = re.search(r'WordPress\s+([0-9]+(?:\.[0-9]+){0,2})',
                       gen_text)
         if m:
             cms_hit("WordPress", m.group(1), "generator tag")
+            core_version = m.group(1)
         m = _CORE_ASSET_RE.search(body)
         if m:
             cms_hit("WordPress", m.group(1), "wp-includes asset")
+            core_version = core_version or m.group(1)
         m = re.search(r'WooCommerce\s+([0-9]+(?:\.[0-9]+){0,2})',
                       gen_text)
         if m:
@@ -185,13 +223,21 @@ def detect_from_homepage(headers, body):
     # --- Plugin / theme assets (passive, from page source) ---
     for kind, slug, rest in _ASSET_RE.findall(body):
         vm = re.search(r'[?&]ver=([0-9][0-9A-Za-z.\-]*)', rest)
+        ver = vm.group(1) if vm else None
+        if ver and core_version \
+                and parse_dotted(ver) == parse_dotted(core_version):
+            # ?ver= equal to the core version is the core
+            # version being echoed by an enqueue, not the
+            # component's version: no evidence at all.
+            ver = None
         plugin_hit(slug, "theme" if kind == "themes" else "plugin",
-                   vm.group(1) if vm else None,
-                   "asset URL" if vm else None)
+                   ver, "asset URL" if ver else None)
 
     # --- Drupal ---
-    if ("drupal" in gen_text.lower() or "/core/modules/" in low
-            or "drupalsettings" in low or "/core/misc/" in low):
+    if ("drupal" in gen_text.lower()
+            or "drupalsettings" in low
+            or _in_tag_context(body, "/core/modules/")
+            or _in_tag_context(body, "/core/misc/")):
         cms_hit("Drupal")
         m = re.search(r'Drupal\s+([0-9]+(?:\.[0-9]+){0,2})',
                       gen_text)
@@ -199,8 +245,9 @@ def detect_from_homepage(headers, body):
             cms_hit("Drupal", m.group(1), "generator tag")
 
     # --- Joomla ---
-    if ("joomla" in gen_text.lower() or "/media/jui/" in low
-            or "/media/system/" in low):
+    if ("joomla" in gen_text.lower()
+            or _in_tag_context(body, "/media/jui/")
+            or _in_tag_context(body, "/media/system/")):
         cms_hit("Joomla")
         m = re.search(r'Joomla!?\s+([0-9]+(?:\.[0-9]+){0,2})',
                       gen_text)
@@ -253,10 +300,18 @@ def probe_versions(fetch, origin, cms, plugins):
                     cur.setdefault("via", "wp-json namespace")
         # readme.txt stable tags for plugins seen without a
         # version (dataset entries first — they matter most),
-        # and style.css Version headers for themes.
+        # and style.css Version headers for themes. The same
+        # files also CORROBORATE (or replace) a low-confidence
+        # asset-URL version: an equal Stable tag / Version
+        # header confirms it; a different one wins outright,
+        # because those headers are the component's own
+        # declaration, while ?ver= is often the core version.
         db = load_plugin_db()
         todo = [s for s, p in plugins.items()
-                if p["kind"] == "plugin" and not p["version"]]
+                if p["kind"] == "plugin"
+                and (not p["version"]
+                     or (p.get("confidence") == "low"
+                         and not p.get("corroborated_by")))]
         todo.sort(key=lambda s: s not in db)
         for slug in todo[:5]:
             r = fetch(f"{origin}/wp-content/plugins/{slug}/"
@@ -265,11 +320,20 @@ def probe_versions(fetch, origin, cms, plugins):
                 m = re.search(r'(?im)^Stable tag:\s*'
                               r'([0-9][0-9A-Za-z.\-]*)', r["body"])
                 if m:
-                    plugins[slug]["version"] = m.group(1)
-                    plugins[slug]["version_source"] = \
-                        "plugin readme.txt"
+                    hit = plugins[slug]
+                    if hit["version"] == m.group(1):
+                        hit["corroborated_by"] = \
+                            "plugin readme.txt"
+                    else:
+                        hit["version"] = m.group(1)
+                        hit["version_source"] = \
+                            "plugin readme.txt"
+                        hit.pop("confidence", None)
         themes = [s for s, p in plugins.items()
-                  if p["kind"] == "theme" and not p["version"]]
+                  if p["kind"] == "theme"
+                  and (not p["version"]
+                       or (p.get("confidence") == "low"
+                           and not p.get("corroborated_by")))]
         for slug in themes[:2]:
             r = fetch(f"{origin}/wp-content/themes/{slug}/"
                       "style.css")
@@ -277,9 +341,14 @@ def probe_versions(fetch, origin, cms, plugins):
                 m = re.search(r'(?im)^\s*Version:\s*'
                               r'([0-9][0-9A-Za-z.\-]*)', r["body"])
                 if m:
-                    plugins[slug]["version"] = m.group(1)
-                    plugins[slug]["version_source"] = \
-                        "theme style.css"
+                    hit = plugins[slug]
+                    if hit["version"] == m.group(1):
+                        hit["corroborated_by"] = "theme style.css"
+                    else:
+                        hit["version"] = m.group(1)
+                        hit["version_source"] = \
+                            "theme style.css"
+                        hit.pop("confidence", None)
     if "Drupal" in cms and not cms["Drupal"]["version"]:
         for path in ("/core/CHANGELOG.txt", "/CHANGELOG.txt"):
             r = fetch(origin + path)
@@ -346,9 +415,37 @@ def plugin_findings(plugins):
         vt = parse_dotted(version)
         if vt is None:
             continue
+        unconfirmed = hit.get("confidence") == "low" \
+            and not hit.get("corroborated_by")
         for vuln in entry["vulnerabilities"]:
             clause = match_clause(vt, vuln.get("clauses"))
             if not clause:
+                continue
+            if unconfirmed:
+                # The ONLY evidence for this version is an
+                # asset ?ver=, which is as often the WordPress
+                # core version or a build hash as the plugin's
+                # own. Report it as an unconfirmed lead at info
+                # level — it must never escalate a verdict.
+                out.append(_finding(
+                    "plugin_version_unconfirmed", "info",
+                    f"Unconfirmed vulnerable {entry.get('kind', 'plugin')}: "
+                    f"{name} {version} (asset URL version)",
+                    f"{name} {version} would fall in the "
+                    f"affected range of {vuln['cve']}, but the "
+                    "version comes only from an asset URL "
+                    "(?ver=), which plugins routinely set to "
+                    "the WordPress core version or a build "
+                    "hash. No readme.txt Stable tag or second "
+                    "asset corroborates it, so this is a lead "
+                    "to check, not a confirmed vulnerability.",
+                    f"Confirm the installed {name} version on "
+                    "the server (or via its readme.txt Stable "
+                    "tag); if it is below "
+                    f"{clause.get('fixed') or 'the fixed release'}"
+                    f", update it to fix {vuln['cve']}.",
+                    slug=slug, cve=vuln["cve"],
+                    kev=bool(vuln.get("kev"))))
                 continue
             cvss = vuln.get("cvss")
             if vuln.get("kev"):
@@ -443,6 +540,8 @@ def analyze(headers, body, fetch=None, origin=None, pre_cms=()):
             "kind": hit["kind"],
             "version": hit["version"],
             "version_source": hit["version_source"],
+            "confidence": hit.get("confidence"),
+            "corroborated_by": hit.get("corroborated_by"),
             "vulnerabilities": hit.get("vulnerabilities", []),
         })
     findings = plugin_findings(plugins) + cms_findings(cms)

@@ -316,8 +316,14 @@ class VersionBoundaries(unittest.TestCase):
     def test_eol_branch_wording(self):
         v = versioning.verdict_for((8, 1, 34))
         self.assertEqual(v["status"], "eol")
-        self.assertIn("partially", v["detail"])
+        self.assertIn("no patched release exists", v["detail"])
         self.assertIn("offline", v["detail"])
+        # The curated advisory's vector-specific text must NOT
+        # leak into the generic EOL wording (expert review
+        # §3.3), and the upgrade target is derived from the
+        # advisory's EOL line (8.2), not hard-coded prose.
+        self.assertNotIn("upload_progress", v["detail"])
+        self.assertIn("8.2 or later", v["remediation"])
 
     def test_eol_distro_caveat(self):
         v = versioning.verdict_for((8, 1, 2), distro=True)

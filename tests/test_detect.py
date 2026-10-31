@@ -41,6 +41,9 @@ EAEL_README = "=== Essential Addons for Elementor ===\n" \
               "Stable tag: 5.7.0\n"
 
 
+FM_README = "=== File Manager ===\nStable tag: 6.8\n"
+
+
 def wp_fetch(url, ctx=None, deadline=None):
     if url.rstrip("/") == "https://example.com":
         return ok(WP_HOME)
@@ -48,6 +51,11 @@ def wp_fetch(url, ctx=None, deadline=None):
         return ok(WP_JSON)
     if "essential-addons" in url and "readme.txt" in url:
         return ok(EAEL_README)
+    if "wp-file-manager" in url and "readme.txt" in url:
+        # Corroborates the asset-URL version (6.8) — without
+        # this, the ?ver= evidence alone must NOT produce a
+        # confirmed finding (P3).
+        return ok(FM_README)
     return notfound(url)
 
 

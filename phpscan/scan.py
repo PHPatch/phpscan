@@ -29,9 +29,9 @@ import threading
 import time
 import urllib.parse
 
-from . import audit, detect, hygiene, versioning
+from . import __version__, audit, detect, hygiene, versioning
 
-_UA = "phpscan/1.4.4 (+https://phpatch.com/security)"
+_UA = f"phpscan/{__version__} (+https://phpatch.com/security)"
 _TIMEOUT = 12
 _MAX_BODY = 512 * 1024
 _MAX_REDIRECTS = 5
@@ -372,48 +372,123 @@ def _h(headers, name):
     return ""
 
 
-def _exposed_lock(fetch, base, offline=False):
-    """Audit a publicly exposed /composer.lock, if one is really
-    there. Returns (lock_info, scan_findings): lock_info is the
-    value for the result's "dependencies" key — None whenever no
-    lockfile is confirmed exposed (absent, not JSON, not a lock,
-    malformed packages, or truncated by the bounded read) — and
-    scan_findings carries the exposure finding plus one
-    vulnerable-dependency finding per audit finding whose
-    severity the published evidence supports.
+_INSTALLED_PATH = "/vendor/composer/installed.json"
 
-    The fetched body is untrusted input: JSON parsing is
-    defensive, structure is validated by the audit engine's own
-    parser, and nothing from the file is echoed into output
-    except package names, versions, and advisory identifiers —
-    the same data the local `phpscan audit` reports. Every merged
-    finding is stamped with its provenance: the exposed lockfile
-    and its URL."""
-    url = base + _LOCK_PATH
+_SCOPE_NOTE = ("Scope: versions are taken from the exposed "
+               "{name}, which may differ from what is actually "
+               "deployed on the server.")
+
+
+def _body_too_large(r, body):
+    """True when the response was cut by the bounded read: a
+    Content-Length past the cap, or a body that arrives at
+    exactly the cap and then fails to parse."""
+    cl = _h(r.get("headers") or {}, "Content-Length")
+    try:
+        if cl and int(cl) > _LOCK_MAX_BODY:
+            return True
+    except ValueError:
+        pass
+    return len((body or "").encode("utf-8", "replace")) \
+        >= _LOCK_MAX_BODY
+
+
+def _installed_to_lock(data):
+    """Normalize vendor/composer/installed.json to a lock-shaped
+    dict for the audit engine: a {"packages": [...]} mapping
+    (Composer 2) or a bare package list (Composer 1), with the
+    per-package dev-requirement flag split into packages-dev.
+    Returns None for anything that is not recognizably that
+    manifest."""
+    if isinstance(data, list):
+        entries = data
+    elif isinstance(data, dict) \
+            and isinstance(data.get("packages"), list):
+        entries = data["packages"]
+    else:
+        return None
+    pkgs, dev_pkgs = [], []
+    for e in entries:
+        if isinstance(e, dict) and e.get("name") \
+                and e.get("version"):
+            (dev_pkgs if e.get("dev-requirement")
+             else pkgs).append(e)
+    if not pkgs and not dev_pkgs:
+        return None
+    return {"packages": pkgs, "packages-dev": dev_pkgs}
+
+
+def _audit_exposed(fetch, url, path, prov_type, kind, noun,
+                   to_lock, offline):
+    """One exposed dependency file: fetch it (bounded read),
+    prove it is what it claims to be (valid JSON, lock-shaped
+    with a `packages` list — a catch-all 200 or an HTML page
+    proves nothing), and audit its versions. Returns
+    (lock_info, scan_findings); lock_info is None when no file
+    is confirmed exposed there."""
     try:
         r = fetch(url)
     except Exception:
         return None, []
     if not r or r.get("status") != 200:
         return None, []
+    body = r.get("body") or ""
     try:
-        lock = json.loads(r.get("body") or "")
+        data = json.loads(body)
     except (ValueError, TypeError):
-        return None, []
-    if not isinstance(lock, dict) \
-            or not isinstance(lock.get("packages"), list):
+        data = None
+    lock = to_lock(data) if data is not None else None
+    if lock is None:
+        if data is None and _body_too_large(r, body) \
+                and body.lstrip().startswith("{"):
+            # Exposed, but past the bounded read: the honest
+            # report is "exposed; too large to audit fully",
+            # never a silent skip that looks like absence.
+            info = {
+                "source": prov_type, "source_url": url,
+                "audit_status": "too_large_to_audit",
+                "scope": _SCOPE_NOTE.format(name=noun),
+                "packages_scanned": 0, "dev_packages_scanned": 0,
+                "sources": {"osv": {"status": "not_run"},
+                            "friendsofphp": {
+                                "snapshot_date": None,
+                                "commit": None},
+                            "kev": {"snapshot_date": None,
+                                    "catalog_version": None}},
+                "findings": [], "unassessed": []}
+            finding = {
+                "kind": kind, "severity": "medium",
+                "title": f"{noun} publicly exposed",
+                "detail": f"The site's {noun} answers publicly "
+                          f"at {path}, but its body exceeds the "
+                          f"scan's bounded read "
+                          f"({_LOCK_MAX_BODY} bytes): exposed; "
+                          "too large to audit fully. The exposure "
+                          "itself discloses the site's dependency "
+                          "versions. "
+                          + _SCOPE_NOTE.format(name=noun),
+                "remediation": f"Remove {noun} from the web "
+                               "root or deny access to it at "
+                               "the web server (like /.env and "
+                               "/.git), and deploy from a build "
+                               "step that keeps composer files "
+                               "outside the served tree.",
+                "path": path,
+                "provenance": {"type": prov_type, "url": url}}
+            return info, [finding]
         return None, []
     try:
         report, _code = audit.audit_lock(lock, url, offline=offline)
     except (ValueError, TypeError, KeyError):
         return None, []
 
-    provenance = {"type": "exposed_composer_lock", "url": url}
+    provenance = {"type": prov_type, "url": url}
     for f in report["findings"]:
         f["provenance"] = dict(provenance)
     lock_info = {
-        "source": "exposed_composer_lock",
+        "source": prov_type,
         "source_url": url,
+        "scope": _SCOPE_NOTE.format(name=noun),
         "packages_scanned": report["packages_scanned"],
         "dev_packages_scanned": report["dev_packages_scanned"],
         "sources": report["sources"],
@@ -423,21 +498,22 @@ def _exposed_lock(fetch, base, offline=False):
 
     total = report["packages_scanned"] + report["dev_packages_scanned"]
     out = [{
-        "kind": "composer_lock_exposed", "severity": "medium",
-        "title": "composer.lock publicly exposed",
-        "detail": f"The site's composer.lock answers publicly at "
-                  f"{_LOCK_PATH}. It discloses the exact version "
+        "kind": kind, "severity": "medium",
+        "title": f"{noun} publicly exposed",
+        "detail": f"The site's {noun} answers publicly at "
+                  f"{path}. It discloses the exact version "
                   f"of every dependency the site runs ({total} "
                   f"locked package(s)), which lets an attacker "
                   f"shop for a matching exploit instead of probing "
                   f"blind. The scan audited those versions; the "
-                  f"results are under 'dependencies'.",
-        "remediation": "Remove composer.lock from the web root "
+                  f"results are under 'dependencies'. "
+                  + _SCOPE_NOTE.format(name=noun),
+        "remediation": f"Remove {noun} from the web root "
                        "or deny access to it at the web server "
                        "(like /.env and /.git), and deploy from a "
                        "build step that keeps composer files "
                        "outside the served tree.",
-        "path": _LOCK_PATH,
+        "path": path,
         "provenance": dict(provenance)}]
     for f in report["findings"]:
         level = audit.severity_level(f)
@@ -448,7 +524,7 @@ def _exposed_lock(fetch, base, offline=False):
             # not carry, and it does not escalate the verdict.
             continue
         detail = (f"{f['title']} — pinned version {f['version']} "
-                  f"of {f['package']} in the exposed composer.lock "
+                  f"of {f['package']} in the exposed {noun} "
                   f"is affected by {f['id']}.")
         if f.get("kev"):
             detail += (" The CVE is in CISA's Known Exploited "
@@ -470,6 +546,39 @@ def _exposed_lock(fetch, base, offline=False):
     return lock_info, out
 
 
+def _exposed_lock(fetch, base, offline=False):
+    """Audit a publicly exposed dependency file, if one is
+    really there: /composer.lock first, then
+    /vendor/composer/installed.json (which reflects what is
+    actually installed, and is exposed by the same class of
+    misconfiguration). Returns (lock_info, scan_findings):
+    lock_info is the value for the result's "dependencies" key
+    — None whenever neither file is confirmed exposed — and
+    scan_findings carries the exposure finding plus one
+    vulnerable-dependency finding per audit finding whose
+    severity the published evidence supports.
+
+    The fetched body is untrusted input: JSON parsing is
+    defensive, the structure must validate as a lock (a dict
+    with a `packages` list) before anything is believed, and
+    the package list itself is never echoed into output —
+    counts and findings only. Every merged finding is stamped
+    with its provenance: the exposed file and its URL."""
+    info, out = _audit_exposed(
+        fetch, base + _LOCK_PATH, _LOCK_PATH,
+        "exposed_composer_lock", "composer_lock_exposed",
+        "composer.lock",
+        lambda d: d if isinstance(d, dict)
+        and isinstance(d.get("packages"), list) else None,
+        offline)
+    if info is not None or out:
+        return info, out
+    return _audit_exposed(
+        fetch, base + _INSTALLED_PATH, _INSTALLED_PATH,
+        "exposed_installed_json", "installed_json_exposed",
+        "installed.json", _installed_to_lock, offline)
+
+
 def scan(url, offline=False):
     if not re.match(r"^https?://", url):
         url = "https://" + url
@@ -485,6 +594,10 @@ def scan(url, offline=False):
               "cms": [], "cms_info": [], "plugins": [],
               "findings": [], "phpinfo_exposed": False,
               "dependencies": None,
+              "coverage": {"probes_attempted": 0,
+                           "probes_completed": 0,
+                           "probes_skipped_deadline": 0,
+                           "catch_all": False, "sources": {}},
               "verdict": None,
               "compromise_indicators": []}
     if not home["ok"] and home["status"] is None:
@@ -507,19 +620,27 @@ def scan(url, offline=False):
     if gen:
         result["signals"]["x_generator"] = gen
 
-    # CMS fingerprints
+    # CMS fingerprints — same discipline as detect.py: a bare
+    # substring mention in prose is not a fingerprint. A hit
+    # needs a generator/header signal, a path in tag/attribute
+    # context, or two independent substrings.
     m = re.search(r'<meta[^>]+name=["\']generator["\'][^>]+'
                   r'content=["\']([^"\']+)', body, re.I)
     meta_gen = m.group(1) if m else ""
     low = body.lower()
-    if "wp-content" in low or "wp-includes" in low or \
-            "wordpress" in meta_gen.lower():
+    if "wordpress" in meta_gen.lower() \
+            or detect._in_tag_context(body, "wp-content/") \
+            or detect._in_tag_context(body, "wp-includes/") \
+            or ("wp-content" in low and "wp-includes" in low):
         result["cms"].append("WordPress")
-    if "powered by phpbb" in low or "styles/prosilver" in low:
+    if "powered by phpbb" in low \
+            or detect._in_tag_context(body, "styles/prosilver"):
         result["cms"].append("phpBB")
-    if "joomla" in meta_gen.lower() or "/media/jui/" in low:
+    if "joomla" in meta_gen.lower() \
+            or detect._in_tag_context(body, "/media/jui/"):
         result["cms"].append("Joomla")
-    if "drupal" in gen.lower() or "/core/modules/" in low:
+    if "drupal" in gen.lower() \
+            or detect._in_tag_context(body, "/core/modules/"):
         result["cms"].append("Drupal")
     if meta_gen:
         result["signals"]["meta_generator"] = meta_gen
@@ -543,8 +664,43 @@ def scan(url, offline=False):
     # nonsense URL and miss a real exposed phpinfo at the root.
     _fp = urllib.parse.urlsplit(home["final_url"])
     base = f"{_fp.scheme}://{_fp.netloc}"
+
+    # Coverage accounting (the family's completeness contract):
+    # every probe fetch after the homepage goes through
+    # _probe_fetch, which counts what was attempted, what
+    # actually completed with an HTTP answer, and what the
+    # shared deadline starved — so a report can never silently
+    # present un-run probes as negative results.
+    coverage = result["coverage"]
+
+    def _probe_fetch(url, ctx=None, deadline=None, max_body=None):
+        coverage["probes_attempted"] += 1
+        try:
+            if max_body is not None:
+                r = _fetch(url, deadline=end, max_body=max_body)
+            else:
+                r = _fetch(url, deadline=end)
+        except TypeError:
+            # Fetch doubles written before the max_body parameter.
+            r = _fetch(url, deadline=end)
+        if r and r.get("status") is not None:
+            coverage["probes_completed"] += 1
+        elif r and "deadline" in str(r.get("error") or ""):
+            coverage["probes_skipped_deadline"] += 1
+        return r
+
+    # Soft-404 / catch-all control, before any existence probe
+    # trusts a 200: one random path that cannot exist. The
+    # result feeds the coverage block and the shell-path
+    # checks (which additionally require a shell signature in
+    # the body — see hunt.remote_indicators).
+    from . import hunt as _hunt_mod
+    catch_all, _control_path = _hunt_mod.catch_all_control(
+        _probe_fetch, base, deadline=end)
+    coverage["catch_all"] = catch_all
+
     for path in _PHPINFO_PATHS:
-        probe = _fetch(base + path, deadline=end)
+        probe = _probe_fetch(base + path)
         b = probe["body"]
         if probe["status"] == 200 and "phpinfo()" in b and \
                 re.search(r"PHP Version\s*&?#?\w*\s*([0-9]+\.[0-9]+\.[0-9]+)", b):
@@ -557,30 +713,29 @@ def scan(url, offline=False):
                 raw_version_text = vm.group(0)
             break
 
-    # Compromise light-check — existence only: a short list of
-    # famous webshell paths, probed through the same guarded
-    # fetch. A 200 is an indicator to investigate with the local
-    # `phpscan hunt`, never a conclusion on its own.
-    from . import hunt as _hunt
-    result["compromise_indicators"] = _hunt.remote_indicators(
-        _fetch, base, deadline=end)
+    # Compromise light-check: a short list of famous webshell
+    # paths, probed through the same guarded fetch. A path is
+    # reported only when its body carries a known shell
+    # signature (the catch-all control above has already run);
+    # a bare 200 proves nothing. An indicator is a lead to
+    # investigate with the local `phpscan hunt`, never a
+    # conclusion on its own.
+    result["compromise_indicators"] = _hunt_mod.remote_indicators(
+        _probe_fetch, base, deadline=end, catch_all=catch_all)
 
     # CMS/plugin detection + config hygiene (detect.py /
     # hygiene.py): the extra read-only probes (REST index,
     # readme files, /.git/HEAD, /.env, directory indexes) draw
     # from the same shared scan deadline as everything else.
-    def _probe(u):
-        return _fetch(u, deadline=end)
-
     cms_info, plugin_list, findings = detect.analyze(
-        headers, body, _probe, base, pre_cms=result["cms"])
+        headers, body, _probe_fetch, base, pre_cms=result["cms"])
     for info in cms_info:
         if info["name"] not in result["cms"]:
             result["cms"].append(info["name"])
     result["cms_info"] = cms_info
     result["plugins"] = plugin_list
     findings += hygiene.header_findings(headers, _fp.scheme)
-    findings += hygiene.exposure_probes(_probe, base,
+    findings += hygiene.exposure_probes(_probe_fetch, base,
                                          result["cms"])
 
     # Exposed composer.lock: the exposure is a hygiene finding,
@@ -589,14 +744,15 @@ def scan(url, offline=False):
     # bounded (_LOCK_MAX_BODY); test doubles written before the
     # max_body parameter fall back to the standard cap.
     def _probe_lock(u):
-        try:
-            return _fetch(u, deadline=end, max_body=_LOCK_MAX_BODY)
-        except TypeError:
-            return _fetch(u, deadline=end)
+        return _probe_fetch(u, max_body=_LOCK_MAX_BODY)
 
     lock_info, lock_findings = _exposed_lock(_probe_lock, base,
                                              offline=offline)
     result["dependencies"] = lock_info
+    if lock_info:
+        coverage["sources"] = {
+            "osv": lock_info["sources"]["osv"]["status"],
+            "friendsofphp": "ok"}
     findings += lock_findings
     if result["phpinfo_exposed"]:
         findings.append(hygiene.phpinfo_finding(
@@ -610,7 +766,8 @@ def scan(url, offline=False):
     if vtuple:
         result["verdict"] = versioning.verdict_for(
             vtuple,
-            distro=versioning.distro_build(raw_version_text))
+            distro=versioning.distro_build(raw_version_text),
+            prerelease=versioning.is_prerelease(raw_version_text))
     elif result["signals"] or result["cms"]:
         result["verdict"] = {
             "status": "indeterminate",

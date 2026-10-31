@@ -1,6 +1,7 @@
-"""CLI: python3 -m phpscan [--offline] <url> [more urls...]
+"""CLI: python3 -m phpscan [--offline] [--format json|text] <url> [more urls...]
 
-Prints one JSON verdict object per URL. --offline keeps every
+Prints one verdict object per URL (JSON by default; --format
+text prints the human-readable rendering). --offline keeps every
 lookup local: in particular, an exposed composer.lock found by
 the scan is audited against the vendored advisory snapshots
 only, with no live OSV queries.
@@ -9,11 +10,12 @@ Also: python3 -m phpscan hunt <webroot> [--include-vendor] —
 read-only local compromise check (see phpscan/hunt.py); its
 exit codes are 0 clean, 1 findings, 2 usage error.
 
-Also: python3 -m phpscan audit <composer.lock|dir> [--offline] —
-dependency audit of a composer.lock against OSV, the vendored
-FriendsOfPHP advisories and the CISA KEV catalog (see
-phpscan/audit.py); exit codes are 0 no findings, 1 findings,
-2 usage/input error.
+Also: python3 -m phpscan audit <composer.lock|dir> [--offline]
+[--fail-on <level>] — dependency audit of a composer.lock
+against OSV, the vendored FriendsOfPHP advisories and the CISA
+KEV catalog (see phpscan/audit.py); exit codes are 0 no
+findings, 1 findings, 2 usage/input error, 3 audit degraded
+(OSV unreachable and nothing else matched).
 
 Exit codes: 0 — scanned, no actionable finding; 1 — at least one
 target is vulnerable, possibly vulnerable, or on an end-of-life
@@ -26,7 +28,7 @@ targets are scanned, the worst code wins.
 import json
 import sys
 
-from .scan import scan
+from .scan import render_text, scan
 
 _ACTIONABLE = ("vulnerable", "possibly_vulnerable", "eol")
 _UNJUDGED = ("not_assessed", "unreachable")
@@ -49,6 +51,27 @@ def main(argv):
     offline = "--offline" in argv
     if offline:
         argv = [a for a in argv if a != "--offline"]
+    fmt = "json"
+    kept = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--format" or a.startswith("--format="):
+            if a == "--format":
+                i += 1
+                if i >= len(argv):
+                    print(__doc__)
+                    return 2
+                fmt = argv[i]
+            else:
+                fmt = a.split("=", 1)[1]
+        else:
+            kept.append(a)
+        i += 1
+    argv = kept
+    if fmt not in ("json", "text"):
+        print(__doc__)
+        return 2
     if not argv:
         print(__doc__)
         return 2
@@ -59,7 +82,10 @@ def main(argv):
             # shape; the offline keyword is passed only when the
             # flag was actually given.
             r = scan(url, offline=True) if offline else scan(url)
-            print(json.dumps(r, indent=1))
+            if fmt == "text":
+                print(render_text(r))
+            else:
+                print(json.dumps(r, indent=1))
             status = (r.get("verdict") or {}).get("status")
             if r.get("compromise_indicators"):
                 worst = max(worst, 1)

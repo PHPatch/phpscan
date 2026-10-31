@@ -49,8 +49,13 @@ It is the open-source scanner behind [phpatch.com](https://phpatch.com).
   `dependencies`, each stamped with the lockfile's URL as
   provenance. The exposure itself is reported as a finding.
   High/critical dependency findings escalate the verdict just
-  like other critical findings. An absent, malformed or
-  oversized lockfile changes nothing about the scan.
+  like other critical findings. When no lock is served, the
+  scan also tries `vendor/composer/installed.json` (Composer's
+  own installed manifest). A lockfile too large for the
+  bounded read is reported as "exposed; too large to audit
+  fully" rather than silently skipped, and the report carries
+  a scope note: versions in an exposed file may differ from
+  what is actually deployed.
 
 ## Verdicts
 
@@ -197,7 +202,11 @@ python3 -m phpscan https://your-site.com
 ```
 
 Output is one JSON object per URL: the verdict, the disclosed PHP
-version and where it was disclosed, and CMS fingerprints.
+version and where it was disclosed, and CMS fingerprints —
+including a `coverage` block reporting how many probes were
+attempted, completed or skipped for the deadline, whether the
+site is a catch-all host, and per-source audit status.
+`--format text` prints a human-readable rendering instead.
 
 Exit codes (for scripts and CI): **0** — scanned, no actionable
 finding; **1** — at least one target is `vulnerable`,
@@ -217,6 +226,7 @@ what Composer installed. `phpscan audit` checks a project's
 python3 -m phpscan audit path/to/composer.lock
 python3 -m phpscan audit path/to/project/        # dir with a lock
 python3 -m phpscan audit composer.lock --offline # vendored data only
+python3 -m phpscan audit composer.lock --fail-on high  # exit 1 only at high+
 ```
 
 Each locked package is matched against three sources: the
@@ -233,10 +243,20 @@ Dev dependencies are included and flagged `"dev": true`.
 
 Every finding carries a `remediation` — the exact
 `composer update <package>` command and the fixed version it
-reaches. An advisory whose published range can't be parsed, or a
-locked version that isn't a release version, is reported under
-`unassessed` instead of being guessed at. Exit codes: **0** — no
-findings; **1** — findings; **2** — missing or unparseable lock.
+reaches. Severities are normalized across all three sources to
+`critical` / `high` / `medium` / `low` / `unknown` — a source
+that publishes no severity never gets one invented for it.
+`--fail-on <level>` makes the exit code 1 only when a finding
+meets that level. An advisory whose published range can't be
+parsed, or a locked version that isn't a release version, is
+reported under `unassessed` instead of being guessed at. The
+locked package list itself is not echoed into the report —
+`--include-packages` opts in to that. Exit codes: **0** — no
+findings; **1** — findings; **2** — missing or unparseable
+lock; **3** — the audit was degraded: OSV could not be reached
+and nothing else matched, so "no findings" would be a guess
+(the verdict is `no_findings_degraded` and names only the
+sources actually consulted).
 The vendored snapshots are refreshed with
 `tools/refresh_advisories.py` (see its docstring).
 

@@ -60,6 +60,20 @@ _DISTRO_RE = re.compile(r"(ubuntu|~deb\d|\+deb\d|-deb\d|\.deb\d|debian)",
                         re.I)
 
 
+_PRE_RE = re.compile(
+    r"\d+\.\d+(?:\.\d+)?[-.]?(rc|alpha|beta|dev)\d*\b", re.I)
+
+
+def is_prerelease(text):
+    """True when a raw version string names a pre-release build
+    (8.3.0RC1, 8.4.0-beta2, 8.5.0-dev): the version number is
+    immediately followed by an RC/alpha/beta/dev marker. A
+    pre-release predates the stable release of its own version,
+    so it must never be judged AS that stable release. Distro
+    suffixes (-1ubuntu2, ~deb12u1) do not match."""
+    return bool(text and _PRE_RE.search(str(text)))
+
+
 def distro_build(text):
     """True when a raw version string looks like a distribution
     package build (Ubuntu/Debian-style suffix). Distros backport
@@ -68,7 +82,8 @@ def distro_build(text):
     return bool(text and _DISTRO_RE.search(str(text)))
 
 
-def verdict_for(version, distro=False, advisories=None):
+def verdict_for(version, distro=False, advisories=None,
+                prerelease=False):
     """Return a verdict dict for one PHP version tuple.
 
     status: 'patched' | 'vulnerable' | 'possibly_vulnerable' |
@@ -99,13 +114,18 @@ def verdict_for(version, distro=False, advisories=None):
             continue
         eol_below = parse_version(adv["eol_below"])
         if (version[0], version[1]) < (eol_below[0], eol_below[1]):
+            # The upgrade target is derived from the advisory's
+            # own EOL line (the oldest branch that still receives
+            # fixes), never a hard-coded branch number that goes
+            # stale as branches age out.
+            target = f"{eol_below[0]}.{eol_below[1]}"
             detail = (f"Branch {branch} is end-of-life for "
-                      f"{adv['id']}: no patched release exists. "
-                      "The php2shell vector can be only partially "
-                      "mitigated at best by configuration "
-                      "(session.upload_progress.enabled = Off); the "
-                      "only complete remedies are a branch upgrade "
-                      "or taking the site offline.")
+                      f"{adv['id']} ({adv.get('title')}): no "
+                      "patched release exists for this branch, "
+                      "and configuration changes can at best "
+                      "mitigate the exposure. The only complete "
+                      "remedies are a branch upgrade or taking "
+                      "the site offline.")
             if distro:
                 detail += (" This build looks like a distribution "
                            "package: the distro may still backport "
@@ -115,9 +135,11 @@ def verdict_for(version, distro=False, advisories=None):
             return {"status": "eol", "version": fmt(version),
                     "branch": branch, "advisory": adv["id"],
                     "cves": adv["cves"], "detail": detail,
-                    "remediation": ("Upgrade to a supported PHP branch "
-                                    "(8.2 or later) and apply its patched "
-                                    "release, or take the site offline.")}
+                    "remediation": (f"Upgrade to a supported PHP "
+                                    f"branch ({target} or later) "
+                                    "and apply its patched "
+                                    "release, or take the site "
+                                    "offline.")}
 
     problems, unpatched, assessed = [], [], False
     for adv in advisories:
@@ -125,7 +147,10 @@ def verdict_for(version, distro=False, advisories=None):
         if floor_txt is not None:
             assessed = True
             floor = parse_version(floor_txt)
-            if version < floor:
+            # A pre-release OF the floor version (8.3.14RC1 vs a
+            # floor of 8.3.14) predates the patched stable
+            # release, so equality is not enough for it.
+            if version < floor or (prerelease and version == floor):
                 problems.append({"advisory": adv["id"],
                                  "title": adv.get("title"),
                                  "cves": adv["cves"],
@@ -164,6 +189,11 @@ def verdict_for(version, distro=False, advisories=None):
                        f"affecting branch {branch} "
                        f"{'has' if len(unpatched) == 1 else 'have'} no "
                        "patched release for this branch at all.")
+        if prerelease:
+            detail += (" The disclosed build is a pre-release, "
+                       "which predates the stable release of its "
+                       "own version number, so it is judged "
+                       "against the stable floors.")
         if distro:
             detail += (" This build looks like a distribution "
                        "package: distros backport security fixes "
@@ -237,11 +267,17 @@ def verdict_for(version, distro=False, advisories=None):
                           "advisory database, so its patch status "
                           "was not assessed. Update the advisory "
                           "data and scan again."}
-    return {"status": "patched", "version": fmt(version), "branch": branch,
-            "detail": f"PHP {fmt(version)} is at or above every patched "
-                      "release floor for its branch. 'Patched' covers "
-                      "only the advisories in this database — it is "
-                      "not a general security guarantee."}
+    detail = (f"PHP {fmt(version)} is at or above every patched "
+              "release floor for its branch. 'Patched' covers "
+              "only the advisories in this database — it is "
+              "not a general security guarantee.")
+    if prerelease:
+        detail += (" The disclosed build is a pre-release of its "
+                   "version; it clears the floors for its branch, "
+                   "but a pre-release is not a stable release and "
+                   "should not be run in production.")
+    return {"status": "patched", "version": fmt(version),
+            "branch": branch, "detail": detail}
 
 
 def fixed_tag_for(version, variant, advisories=None):
