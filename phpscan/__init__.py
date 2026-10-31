@@ -12,4 +12,4 @@ verdict is an honest INDETERMINATE, with the path to a certain
 answer (a read-only server check) explained at https://phpatch.com.
 """
 
-__version__ = "1.7.0"
+__version__ = "1.7.1"
