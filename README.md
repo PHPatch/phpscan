@@ -87,6 +87,7 @@ tool prints:
 ```console
 $ python3 -m phpscan http://fixture.example
 {
+ "schema_version": 1,
  "target": "http://fixture.example",
  "reachable": true,
  "http_status": 200,
@@ -209,12 +210,20 @@ site is a catch-all host, and per-source audit status.
 `--format text` prints a human-readable rendering instead.
 
 Exit codes (for scripts and CI): **0** — scanned, no actionable
-finding; **1** — at least one target is `vulnerable`,
-`possibly_vulnerable`, or on an end-of-life branch; **2** — usage
-error, or a target could not be judged at all: unreachable, or
-`not_assessed` (its PHP branch is newer than the advisory
-database, so the scanner cannot judge it). With several targets,
-the worst code wins.
+finding, full coverage; **1** — at least one target is
+`vulnerable`, `possibly_vulnerable`, or on an end-of-life
+branch, or carries a high-severity compromise indicator;
+**3** — the scan was degraded: the shared deadline starved
+probes, so part of the target was never checked (the report's
+`coverage` block counts them); **2** — usage error, or a target
+could not be judged at all: unreachable, or `not_assessed` (its
+PHP branch is newer than the advisory database, so the scanner
+cannot judge it). With several targets the codes combine by
+precedence, not by number: findings (1) outrank degraded (3),
+which outranks cannot-judge (2), which outranks clean (0) — a
+vulnerable target is never masked by an unreachable one scanned
+in the same run. `python3 -m phpscan --version` prints the
+version and exits 0.
 
 ### Audit a composer.lock
 
@@ -247,7 +256,13 @@ reaches. Severities are normalized across all three sources to
 `critical` / `high` / `medium` / `low` / `unknown` — a source
 that publishes no severity never gets one invented for it.
 `--fail-on <level>` makes the exit code 1 only when a finding
-meets that level. An advisory whose published range can't be
+meets that level — with one exception: a finding whose sources
+publish no severity (`unknown`, which is every
+FriendsOfPHP-only finding) counts as meeting **every** level.
+Unrated fails closed, because "no severity published" is not
+evidence of low severity; pass `--ignore-unrated` for the
+opposite policy, where unrated findings never trip the gate.
+An advisory whose published range can't be
 parsed, or a locked version that isn't a release version, is
 reported under `unassessed` instead of being guessed at. The
 locked package list itself is not echoed into the report —
@@ -259,6 +274,43 @@ and nothing else matched, so "no findings" would be a guess
 sources actually consulted).
 The vendored snapshots are refreshed with
 `tools/refresh_advisories.py` (see its docstring).
+
+### Hunt for compromise indicators in a webroot
+
+`phpscan hunt` is the local counterpart of the scan: a strictly
+read-only walk of a webroot you own (run it on the server),
+checking for known webshell filenames and body fingerprints,
+backdoor idioms (`eval`/`system` of raw request input,
+obfuscated decode chains), `auto_prepend_file` persistence in
+`.user.ini`/`.htaccess`/`php.ini`, PHP files in upload/media
+directories, double extensions, hidden PHP dotfiles, known-bad
+SHA-256 hashes, and modification-time outliers:
+
+```bash
+python3 -m phpscan hunt /var/www/html
+python3 -m phpscan hunt /var/www/html --include-vendor
+```
+
+Files larger than 1 MB are scanned by streaming (up to a 16 MB
+per-file hard cap); anything past the cap is reported as
+`unscanned_bytes`, never silently skipped, and oversize files
+are listed under `oversize_files` with their sizes and scanned
+byte counts. Inside composer package directories (per
+`vendor/composer/installed.json`) only the high-severity rules
+run by default — request-input eval/exec, shell fingerprints,
+persistence, known-bad hashes — because planting a shell
+inside a real package is the normal way to hide in `vendor/`,
+and a forged manifest must not be able to hide a tree from
+those rules. The noisy rules (low/medium patterns, special-dir,
+double-extension, dotfile and modification-time checks) are
+what is reduced there; the verdict text says so, with the
+counts of affected files and directories. `--include-vendor`
+runs every rule everywhere. Exit codes: **0** — clean;
+**1** — findings; **2** — usage error; **3** — no findings,
+but the scan was incomplete (the walk cap was hit, bytes went
+unscanned, or vendor packages were scanned with reduced
+rules), so the clean is a degraded one. Every JSON report
+(scan, audit, hunt) carries `"schema_version": 1`.
 
 Prefer a browser? The same scan runs free at
 [phpatch.com](https://phpatch.com) and includes a PDF report.

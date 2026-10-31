@@ -6,6 +6,54 @@ the git log.
 
 ## Unreleased
 
+Second-pass expert-review fixes:
+
+- Asset `?ver=` versions can no longer be "corroborated" by a
+  second asset: one enqueue constant stamps every asset a
+  plugin ships, so repetition is not confirmation. Only a
+  readme.txt Stable tag or a style.css Version header confirms
+  an asset version (`version_confirmed`); repeated asset URLs
+  are reported as `asset_repeat` and the finding stays
+  info-level.
+- `hunt`: composer package directories are no longer skipped
+  wholesale. The high-severity rules (request-input eval/exec,
+  shell fingerprints, `auto_prepend_file` persistence,
+  known-bad hashes) run inside packages too — a shell planted
+  in a real package, or hidden behind a forged
+  `installed.json`, is found. The noisy rules stay reduced
+  there, and the verdict text discloses the reduction with
+  file/directory counts (`vendor_partial_files`,
+  `vendor_partial_dirs`).
+- `hunt`: oversize files are streamed whole up to a 16 MB
+  per-file hard cap (a payload padded into the middle of a
+  multi-megabyte file is found); `oversize_files` is now a
+  list of `{path, size, scanned_bytes}` and bytes past the cap
+  are reported as `unscanned_bytes`. A finding-free hunt whose
+  coverage was reduced (walk cap, hard cap, vendor reduction)
+  exits 3 with "incomplete" in the verdict text instead of
+  presenting as a full clean.
+- `audit`: `--fail-on` fails closed on unrated findings —
+  severity `unknown` (every FriendsOfPHP-only finding) counts
+  as meeting every threshold; `--ignore-unrated` opts out.
+- Scan mode exits 3 when the shared deadline starved probes
+  and nothing was found; multi-target exit codes now combine
+  by precedence (findings 1 > degraded 3 > cannot-judge 2 >
+  clean 0) instead of numeric max, so findings are never
+  masked by an unreachable target in the same run.
+- `phpscan --version` prints the version and exits 0 (it was
+  previously treated as a scan target).
+- Every JSON report (scan/audit/hunt) carries
+  `"schema_version": 1`.
+- A signature-less 200 on a known shell path on a non-catch-all
+  site now earns a low-severity "review manually" note
+  (`known-shell-path-unconfirmed`) instead of a silent drop;
+  on catch-all sites it is still dropped, and a low note alone
+  never changes the scan exit code.
+- The exposed-lockfile probe stops reading early when the
+  response is plainly not a lockfile (HTML Content-Type, or a
+  first non-whitespace byte other than `{`) instead of
+  consuming the full 8 MB body.
+
 ## 1.7.0 — 2026-10-30
 
 - External scan: exposed-`composer.lock` audit. When a scan
